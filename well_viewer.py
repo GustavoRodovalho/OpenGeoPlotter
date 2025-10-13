@@ -1,15 +1,11 @@
 import sys
 import pandas as pd
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget
-from PyQt5.QtCore import QAbstractTableModel, Qt, QPoint
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QStackedWidget
+from PyQt5.QtCore import QAbstractTableModel, Qt
 from load_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
-
-import mplcursors
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from plot_manager import LocalizationMap
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 
 class PandasModel(QAbstractTableModel):
@@ -73,18 +69,35 @@ class WellLoggingViewer(QWidget):
         self.table_tab.setLayout(table_layout)
         self.tabs.addTab(self.table_tab, "Dataset")
 
-        # Tab 2: Statistics Plot
+        # Tab 2: Localization Map
         self.plot_tab = QWidget()
-        plot_layout = QVBoxLayout()
-        self.canvas = FigureCanvas(Figure(figsize=(10, 6)))
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        plot_layout.addWidget(self.toolbar)
-        plot_layout.addWidget(self.canvas)
-        self.plot_tab.setLayout(plot_layout)
-        self.tabs.addTab(self.plot_tab, "Variable Statistics")
+        plot_layout = QHBoxLayout()
+        # Sidebar menu
+        self.plot_menu = QListWidget()
+        self.plot_menu.addItem("Latitude/Longitude")
+        self.plot_menu.addItem("X/Y")
+        self.plot_menu.setFixedWidth(150)
+        self.plot_menu.currentRowChanged.connect(self.switch_plot_view)
+        plot_layout.addWidget(self.plot_menu)
 
-        # Tab 3: Well Plot
-        # ...
+        # Stacked widget to hold different
+        self.plot_stack = QStackedWidget()
+
+        # Localization Map view
+        self.localization_view = QWidget()
+        self.localization_layout = QVBoxLayout()
+        self.localization_view.setLayout(self.localization_layout)
+        self.plot_stack.addWidget(self.localization_view)
+
+        # Statistics view
+        self.statistics_view = QWidget()
+        self.statistics_layout = QVBoxLayout()
+        self.statistics_view.setLayout(self.statistics_layout)
+        self.plot_stack.addWidget(self.statistics_view)
+
+        plot_layout.addWidget(self.plot_stack)
+        self.plot_tab.setLayout(plot_layout)
+        self.tabs.addTab(self.plot_tab, "Localization Map")
 
         self.setLayout(main_layout)
 
@@ -93,6 +106,14 @@ class WellLoggingViewer(QWidget):
             column = self.df.columns[index.column()]
             missing = self.df[column].isna().sum()
             self.missing_count.setText(f"Missing values in {column}: {missing}")
+
+    def switch_plot_view(self, index):
+        self.plot_stack.setCurrentIndex(index)
+        if index == 0:
+            mode = "Latitude/Longitude"
+        elif index == 1: 
+            mode = "X/Y"
+        self.plot_localization_map(mode)
 
     def load_csv(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV Files (*.csv)")
@@ -113,6 +134,7 @@ class WellLoggingViewer(QWidget):
                     well_column = self.selected_columns.get("Well ID")
                     if well_column and well_column in self.df.columns:
                         num_wells = self.df[well_column].nunique()
+                        print(f"Unique wells: {self.df[well_column].unique()}")
                         self.well_count.setText(f"Number of wells: {num_wells}")
                     else:
                         self.well_count.setText("Number of wells:")
@@ -124,39 +146,22 @@ class WellLoggingViewer(QWidget):
                     type_map = type_dialog.get_type_map()
                 for col, dtype in type_map.items():
                     try:
-                        if dtype == "int":
-                            self.df[col] = pd.to_numeric(self.df[col], errors="coerce").astype("Int64")
-                        elif dtype == "float":
+                        if dtype in ["int", "float"]:
+                            self.df[col] = self.df[col].astype(str).str.replace(",", ".", regex=False)
                             self.df[col] = pd.to_numeric(self.df[col], errors="coerce")
+                            if dtype == "int":
+                                self.df[col] = self.df[col].astype("Int64")
                         elif dtype == "str":
                             self.df[col] = self.df[col].astype(str)
                     except Exception as e:
                         print(f"Could not convert column {col} to {dtype}: {e}")
-                print(type_map)
 
                 # Plot statistics in the plot tab
-                self.plot_variable_statistics()
-    
-    def plot_variable_statistics(self):
-        if self.df is None:
-            return
+                # self.plot_variable_statistics()
 
-        self.canvas.figure.clf()
-        ax = self.canvas.figure.add_subplot(111)
-
-        numeric_df = self.df.select_dtypes(include=["number"]).dropna()
-        melted = numeric_df.melt(var_name="Variable", value_name="Value")
-
-        sns.boxplot(x="Variable", y="Value", data=melted, ax=ax, showfliers=False)
-        strip = sns.stripplot(x="Variable", y="Value", data=melted, ax=ax, color="black", alpha=0.3, jitter=True)
-
-        ax.set_title("Variable Statistics")
-        ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
-
-        # Add hover tooltips
-        mplcursors.cursor(strip.collections, hover=True)
-
-        self.canvas.draw()
+    def plot_localization_map(self, mode):
+        plotter = LocalizationMap(self.df, self.selected_columns, self.localization_layout)
+        plotter.plot_localization(mode)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
