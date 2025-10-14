@@ -1,11 +1,9 @@
 import sys
 import pandas as pd
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QStackedWidget
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QStackedWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from load_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from plot_manager import LocalizationMap
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 
 
 class PandasModel(QAbstractTableModel):
@@ -69,18 +67,50 @@ class WellLoggingViewer(QWidget):
         self.table_tab.setLayout(table_layout)
         self.tabs.addTab(self.table_tab, "Dataset")
 
-        # Tab 2: Localization Map
+        # Tab 2: Localization map
+        self.loc_tab = QWidget()
+        # 2.1. Options sidebar
+        sidebar = QVBoxLayout()
+        sidebar.addWidget(QLabel("Coordinate type"))
+        radio_group = QButtonGroup(self.loc_tab)
+        self.latlon_radio = QRadioButton("Latitude/Longitude")
+        self.xy_radio = QRadioButton("X/Y")
+        radio_group.addButton(self.latlon_radio)
+        radio_group.addButton(self.xy_radio)
+        sidebar.addWidget(self.latlon_radio)
+        sidebar.addWidget(self.xy_radio)
+        # 2.2. Selected wells
+        point_list = QListWidget()
+        sidebar.addWidget(QLabel("Selected wells"))
+        sidebar.addWidget(point_list)
+        clear_button = QPushButton("Clear selection")
+        clear_button.clicked.connect(point_list.clear)
+        sidebar.addWidget(clear_button)
+        sidebar_box = QGroupBox("Options")
+        sidebar_box.setMaximumWidth(200)
+        sidebar_box.setLayout(sidebar)
+        # 2.3. Map widget
+        self.map_layout = QVBoxLayout()
+        self.map_canvas = LocalizationMap(self.df, self.selected_columns, self.map_layout, point_list)
+        # Assemble layouts
+        combined_layout = QHBoxLayout()
+        combined_layout.addWidget(sidebar_box)
+        combined_layout.addLayout(self.map_layout)
+        self.loc_tab.setLayout(combined_layout)
+        self.tabs.addTab(self.loc_tab, "Localization Map")
+
+        # Tab 3: Well visualizer
         self.plot_tab = QWidget()
         plot_layout = QHBoxLayout()
-        # Sidebar menu
+        # Sidebar menu for each well
         self.plot_menu = QListWidget()
-        self.plot_menu.addItem("Latitude/Longitude")
-        self.plot_menu.addItem("X/Y")
+        for well in ['Well 1', 'Well 2']:
+            self.plot_menu.addItem(well)
         self.plot_menu.setFixedWidth(150)
-        self.plot_menu.currentRowChanged.connect(self.switch_plot_view)
+        # self.plot_menu.currentRowChanged.connect(self.switch_plot_view)
         plot_layout.addWidget(self.plot_menu)
 
-        # Stacked widget to hold different
+        # Stacked widget to hold different views
         self.plot_stack = QStackedWidget()
 
         # Localization Map view
@@ -97,7 +127,7 @@ class WellLoggingViewer(QWidget):
 
         plot_layout.addWidget(self.plot_stack)
         self.plot_tab.setLayout(plot_layout)
-        self.tabs.addTab(self.plot_tab, "Localization Map")
+        self.tabs.addTab(self.plot_tab, "Well Plots")
 
         self.setLayout(main_layout)
 
@@ -106,14 +136,6 @@ class WellLoggingViewer(QWidget):
             column = self.df.columns[index.column()]
             missing = self.df[column].isna().sum()
             self.missing_count.setText(f"Missing values in {column}: {missing}")
-
-    def switch_plot_view(self, index):
-        self.plot_stack.setCurrentIndex(index)
-        if index == 0:
-            mode = "Latitude/Longitude"
-        elif index == 1: 
-            mode = "X/Y"
-        self.plot_localization_map(mode)
 
     def load_csv(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV Files (*.csv)")
@@ -134,7 +156,8 @@ class WellLoggingViewer(QWidget):
                     well_column = self.selected_columns.get("Well ID")
                     if well_column and well_column in self.df.columns:
                         num_wells = self.df[well_column].nunique()
-                        print(f"Unique wells: {self.df[well_column].unique()}")
+                        self.well_list = self.df[well_column].unique()
+                        print(f"Unique wells: {self.well_list}")
                         self.well_count.setText(f"Number of wells: {num_wells}")
                     else:
                         self.well_count.setText("Number of wells:")
@@ -156,12 +179,49 @@ class WellLoggingViewer(QWidget):
                     except Exception as e:
                         print(f"Could not convert column {col} to {dtype}: {e}")
 
-                # Plot statistics in the plot tab
-                # self.plot_variable_statistics()
+                # Check available coordinate types
+                has_latlon = (
+                    self.selected_columns.get("Latitude") in self.df.columns and
+                    self.selected_columns.get("Longitude") in self.df.columns
+                )
+                has_xy = (
+                    self.selected_columns.get("X") in self.df.columns and
+                    self.selected_columns.get("Y") in self.df.columns
+                )
+
+                # Disable unavailable options
+                self.latlon_radio.setEnabled(has_latlon)
+                self.xy_radio.setEnabled(has_xy)
+
+                # If neither coordinate type is available, disable the entire map tab
+                if not has_latlon and not has_xy:
+                    idx = self.tabs.indexOf(self.loc_tab)
+                    if idx != -1:
+                        self.tabs.setTabEnabled(idx, False)
+                    QMessageBox.warning(
+                        self,
+                        "Missing coordinates",
+                        "Neither Latitude/Longitude nor X/Y coordinate columns were specified."
+                    )
+                    return
+
+                # Default coordinate type (prioritize Lat/Lon if available)
+                if has_latlon:
+                    self.latlon_radio.setChecked(True)
+                    self.plot_localization_map("Latitude/Longitude")
+                elif has_xy:
+                    self.xy_radio.setChecked(True)
+                    self.plot_localization_map("X/Y")
+
+                # Connect radio buttons
+                self.latlon_radio.toggled.connect(lambda: self.plot_localization_map("Latitude/Longitude"))
+                self.xy_radio.toggled.connect(lambda: self.plot_localization_map("X/Y"))
 
     def plot_localization_map(self, mode):
-        plotter = LocalizationMap(self.df, self.selected_columns, self.localization_layout)
-        plotter.plot_localization(mode)
+        # Update data and replot without recreating the canvas
+        self.map_canvas.df = self.df
+        self.map_canvas.selected_columns = self.selected_columns
+        self.map_canvas.plot_localization(mode)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
