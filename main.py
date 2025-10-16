@@ -1,11 +1,12 @@
 import sys
 import pandas as pd
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox, QComboBox
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox, QToolButton, QStyle
 from PyQt5.QtCore import QAbstractTableModel, Qt
-from load_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
+from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
-# from well_plot import WellGridSpec
+from well_plot import PlotConfigDialog
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
 class PandasModel(QAbstractTableModel):
@@ -82,11 +83,22 @@ class WellLoggingViewer(QWidget):
         sidebar.addWidget(self.xy_radio)
         # Selected wells
         self.point_list = QListWidget()
-        sidebar.addWidget(QLabel("Selected wells"))
+        info_layout = QHBoxLayout()
+        select_label = QLabel("Selected wells")
+        info_layout.addWidget(select_label)
+        info_btn = QToolButton()
+        info_btn.setToolTip("Right-click anywhere on the canvas to deselect")
+        info_btn.setCursor(Qt.PointingHandCursor)
+        info_btn.setAutoRaise(True)   # flat look, like a small icon button
+        info_btn.setFixedSize(16, 16)
+        # Use the platform's standard "information" icon
+        info_icon = info_btn.style().standardIcon(QStyle.SP_MessageBoxInformation)
+        info_btn.setIcon(info_icon)
+        info_btn.setIconSize(info_btn.size() * 0.8)
+        info_layout.addWidget(info_btn)
+        info_layout.addStretch()
+        sidebar.addLayout(info_layout)
         sidebar.addWidget(self.point_list)
-        clear_button = QPushButton("Clear selection")
-        clear_button.clicked.connect(self.point_list.clear)
-        sidebar.addWidget(clear_button)
         split_dataset = QPushButton("Split dataset")
         split_dataset.clicked.connect(self.export_selected_wells)
         sidebar.addWidget(split_dataset)
@@ -96,6 +108,8 @@ class WellLoggingViewer(QWidget):
         # 2.2. Map widget
         self.map_layout = QVBoxLayout()
         self.map_canvas = LocalizationMap(self.df, self.selected_columns, self.map_layout, self.point_list)
+        toolbar = NavigationToolbar(self.map_canvas, self)
+        self.map_layout.addWidget(toolbar)
         # Assemble layouts
         combined_layout = QHBoxLayout()
         combined_layout.addWidget(sidebar_box)
@@ -106,8 +120,9 @@ class WellLoggingViewer(QWidget):
         # Tab 3: Well visualizer
         self.visualizer_tab = QWidget()
         sidebar_menu = QVBoxLayout()
-        self.update_button = QPushButton("Update Plots")
-        sidebar_menu.addWidget(self.update_button)
+        self.add_button = QPushButton("Add Plots")
+        self.add_button.clicked.connect(self.add_plots)
+        sidebar_menu.addWidget(self.add_button)
         self.well_list = QListWidget()
         sidebar_menu.addWidget(self.well_list)
         self.remove_selection = QPushButton("Remove selected depths")
@@ -257,9 +272,14 @@ class WellLoggingViewer(QWidget):
         else:
             return
 
-    def update_plot_settings(self):
+    def add_plots(self):
         if self.selected_columns is not None:
-            pass
+            remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
+            dialog = PlotConfigDialog(self.df, remaining_columns, self)
+            if dialog.exec_() == QDialog.Accepted:
+                params = dialog.get_parameters()
+                print("User selected parameters:", params)
+                # TO DO: use params to draw on self.figure
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
