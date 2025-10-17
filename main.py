@@ -55,7 +55,7 @@ class WellLoggingViewer(QWidget):
         table_layout = QVBoxLayout()
         # Table widget
         self.table = QTableView()
-        self.table.clicked.connect(self.handle_column_click)
+        self.table.clicked.connect(self.handle_column_click) # replace for handle column click and opening a QDialog with the statistics for numeric columns (int or float)
         table_layout.addWidget(self.table)
         # Dataset shape
         self.dataset_shape = QLabel("Dataset shape:")
@@ -77,6 +77,9 @@ class WellLoggingViewer(QWidget):
         radio_group = QButtonGroup(self.loc_tab)
         self.latlon_radio = QRadioButton("Latitude/Longitude")
         self.xy_radio = QRadioButton("X/Y")
+        # Connect radio buttons in localization map
+        self.latlon_radio.toggled.connect(lambda: self.plot_localization_map("Latitude/Longitude"))
+        self.xy_radio.toggled.connect(lambda: self.plot_localization_map("X/Y"))
         radio_group.addButton(self.latlon_radio)
         radio_group.addButton(self.xy_radio)
         sidebar.addWidget(self.latlon_radio)
@@ -144,15 +147,10 @@ class WellLoggingViewer(QWidget):
 
         self.setLayout(main_layout)
 
-    def handle_column_click(self, index):
-        if self.df is not None and index.isValid():
-            column = self.df.columns[index.column()]
-            missing = self.df[column].isna().sum()
-            self.missing_count.setText(f"Missing values in {column}: {missing}")
-
     def load_csv(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Open CSV", "", "CSV Files (*.csv)")
         if file_path:
+            self.df = None
             # Load .csv dialog
             dialog = LoadCSVDialog()
             if dialog.exec_() == QDialog.Accepted:
@@ -190,49 +188,24 @@ class WellLoggingViewer(QWidget):
                     except Exception as e:
                         print(f"Could not convert column {col} to {dtype}: {e}")
 
-                # Check available coordinate types
-                has_latlon = (
-                    self.selected_columns.get("Latitude") in self.df.columns and
-                    self.selected_columns.get("Longitude") in self.df.columns
-                )
-                has_xy = (
-                    self.selected_columns.get("X") in self.df.columns and
-                    self.selected_columns.get("Y") in self.df.columns
-                )
-
-                # Disable unavailable options
-                self.latlon_radio.setEnabled(has_latlon)
-                self.xy_radio.setEnabled(has_xy)
-
-                # If neither coordinate type is available, disable the entire map tab
-                if not has_latlon and not has_xy:
-                    idx = self.tabs.indexOf(self.loc_tab)
-                    if idx != -1:
-                        self.tabs.setTabEnabled(idx, False)
-                    QMessageBox.warning(
-                        self,
-                        "Missing coordinates",
-                        "Neither Latitude/Longitude nor X/Y coordinate columns were specified."
-                    )
-                    return
-
-                # Default coordinate type (prioritize Lat/Lon if available)
-                if has_latlon:
-                    self.latlon_radio.setChecked(True)
-                    self.plot_localization_map("Latitude/Longitude")
-                elif has_xy:
-                    self.xy_radio.setChecked(True)
-                    self.plot_localization_map("X/Y")
-
-                # Connect radio buttons
-                self.latlon_radio.toggled.connect(lambda: self.plot_localization_map("Latitude/Longitude"))
-                self.xy_radio.toggled.connect(lambda: self.plot_localization_map("X/Y"))
+    def handle_column_click(self, index):
+        if self.df is not None and index.isValid():
+            column = self.df.columns[index.column()]
+            missing = self.df[column].isna().sum()
+            self.missing_count.setText(f"Missing values in {column}: {missing}")
 
     def plot_localization_map(self, mode):
-        # Update data and replot without recreating the canvas
-        self.map_canvas.df = self.df
-        self.map_canvas.selected_columns = self.selected_columns
-        self.map_canvas.plot_localization(mode)
+        if self.df is not None:
+            if mode == "Latitude/Longitude":
+                if self.selected_columns.get("Latitude") in self.df.columns and self.selected_columns.get("Longitude") in self.df.columns:
+                    self.map_canvas.df = self.df
+                    self.map_canvas.selected_columns = self.selected_columns
+                    self.map_canvas.plot_localization(mode)
+            if mode == "X/Y":
+                if self.selected_columns.get("X") in self.df.columns and self.selected_columns.get("Y") in self.df.columns:
+                    self.map_canvas.df = self.df
+                    self.map_canvas.selected_columns = self.selected_columns
+                    self.map_canvas.plot_localization(mode)
 
     def export_selected_wells(self):
         # Export two DataFrames: one with selected wells in the list widget and another with the remaining wells
@@ -273,13 +246,14 @@ class WellLoggingViewer(QWidget):
             return
 
     def add_plots(self):
-        if self.selected_columns is not None:
-            remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
-            dialog = PlotConfigDialog(self.df, remaining_columns, self)
-            if dialog.exec_() == QDialog.Accepted:
-                params = dialog.get_parameters()
-                print("User selected parameters:", params)
-                # TO DO: use params to draw on self.figure
+        if self.df is not None:
+            if self.selected_columns is not None:
+                remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
+                dialog = PlotConfigDialog(self.df, remaining_columns, self)
+                if dialog.exec_() == QDialog.Accepted:
+                    params = dialog.get_parameters()
+                    print("User selected parameters:", params)
+                    # TO DO: use params to draw on self.figure
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
