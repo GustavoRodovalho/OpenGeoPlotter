@@ -2,12 +2,13 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, 
     QDialog, QPushButton, QLabel, QListWidget, QGroupBox, 
     QComboBox, QFormLayout, QSpinBox, QLineEdit, QDialogButtonBox,
-    QListWidgetItem, QColorDialog, QMessageBox, QCheckBox
+    QListWidgetItem, QColorDialog, QMessageBox, QCheckBox, QScrollArea
 )
 from PyQt5.QtGui import QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+# Plot Configuration Dialog with Tabs
 class PlotConfigDialog(QDialog):
     # QDialog with Tabs
     def __init__(self, df, remaining_columns, parent=None):
@@ -15,19 +16,17 @@ class PlotConfigDialog(QDialog):
         self.df = df
         self.remaining_columns = remaining_columns
         self.setWindowTitle("Add Plots")
-        self.resize(600, 400)
+        self.resize(600, 600)
 
         # Tab widget
         self.tabs = QTabWidget()
         self.curve_tab = CurvePlotTab(self.df, remaining_columns)
         self.time_tab = TimeSeriesPlotTab(self.df, remaining_columns)
         self.prop_tab = ProportionPlotTab(self.df, remaining_columns)
-        self.litho_tab = LithologyPlotTab(self.df, remaining_columns)
 
         self.tabs.addTab(self.curve_tab, "Curve Plot")
         self.tabs.addTab(self.time_tab, "Time Series Plot")
         self.tabs.addTab(self.prop_tab, "Proportion Plot")
-        self.tabs.addTab(self.litho_tab, "Lithology Plot")
 
         # Dialog buttons (OK / Cancel)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -39,16 +38,31 @@ class PlotConfigDialog(QDialog):
         layout.addWidget(buttons)
         self.setLayout(layout)
 
+        # Store plots configs
+        self.curves = None
+        self.series = None
+        self.proportions = None
+
+    def accept(self):
+        """Called when user clicks OK. Save results from each tab."""
+        try:
+            self.curves = self.curve_tab.get_curves()
+            self.series = self.time_tab.get_series()
+            self.proportions = self.prop_tab.get_proportions()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not read plot configurations:\n{e}")
+            return  # Do not close dialog if something failed
+    
+        super().accept()
+
     def get_parameters(self):
         """Return all configured parameters as a dict."""
         return {
-            "curve": self.curve_tab.get_parameters(),
-            "time": self.time_tab.get_parameters(),
-            "proportion": self.prop_tab.get_parameters(),
-            "lithology": self.litho_tab.get_parameters(),
+            "curves": self.curve_tab.curves,
+            "time series": self.time_tab.series,
+            "proportions": self.prop_tab.proportions
         }
 
-# Individual Tabs
 class CurvePlotTab(QWidget):
     def __init__(self, df, remaining_columns):
         super().__init__()
@@ -142,13 +156,6 @@ class CurvePlotTab(QWidget):
         """Return all configured curve info."""
         return self.curves
 
-    def get_parameters(self):
-        return {
-            "variable": self.var_combo.currentText(),
-            "depth": self.depth_col.currentText(),
-            "color": self.line_color.text()
-        }
-
 class TimeSeriesPlotTab(QWidget):
     def __init__(self, df, remaining_columns):
         super().__init__()
@@ -174,7 +181,7 @@ class TimeSeriesPlotTab(QWidget):
         form.addRow("Series Name:", self.series_name)
         # Selection of some of the most common matplotlib colormaps
         self.colormap_combo = QComboBox()
-        self.colormap_combo.addItems(sorted(["viridis", "plasma", "inferno", "magma", "cividis", "jet", "turbo", "coolwarm", "Greys", "Spectral"]))
+        self.colormap_combo.addItems(["viridis", "plasma", "inferno", "magma", "cividis", "jet", "turbo", "coolwarm", "Greys", "Spectral"])
         form.addRow("Colormap:", self.colormap_combo)
         # Log scale option
         self.log_checkbox = QCheckBox("Use logarithmic scale for bins")
@@ -255,84 +262,162 @@ class TimeSeriesPlotTab(QWidget):
 class ProportionPlotTab(QWidget):
     def __init__(self, df, remaining_columns):
         super().__init__()
-        layout = QVBoxLayout()
-        form = QFormLayout()
-        self.category_var = QComboBox()
-        self.category_var.addItems(remaining_columns)
-        form.addRow("Categorical variable:", self.category_var)
-        layout.addLayout(form)
-        self.setLayout(layout)
-
-    def get_parameters(self):
-        return {
-            "category": self.category_var.currentText()
-        }
-
-
-class LithologyPlotTab(QWidget):
-    def __init__(self, df, remaining_columns):
-        super().__init__()
-        layout = QVBoxLayout()
-        form = QFormLayout()
-        self.lith_var = QComboBox()
-        self.lith_var.addItems(remaining_columns)
-        self.pattern = QLineEdit("sandstone, shale, limestone")
-        form.addRow("Lithology column:", self.lith_var)
-        form.addRow("Patterns:", self.pattern)
-        layout.addLayout(form)
-        self.setLayout(layout)
-
-    def get_parameters(self):
-        return {
-            "lithology": self.lith_var.currentText(),
-            "patterns": self.pattern.text().split(',')
-        }
-
-
-# Integration into your existing tab
-class WellVisualizerTab(QWidget):
-    def __init__(self, df, selected_columns):
-        super().__init__()
         self.df = df
-        self.selected_columns = selected_columns
+        self.remaining_columns = remaining_columns
+        self.proportions = []  # list of dicts {"variable_list", "name", "color_list"}
+        self.variable_color_pairs = []
 
-        sidebar_menu = QVBoxLayout()
-        self.add_button = QPushButton("Add Plots")
-        sidebar_menu.addWidget(self.add_button)
-        self.well_list = QListWidget()
-        sidebar_menu.addWidget(self.well_list)
-        self.remove_selection = QPushButton("Remove selected depths")
-        sidebar_menu.addWidget(self.remove_selection)
-        sidebar_menu_box = QGroupBox("Plots Settings")
-        sidebar_menu_box.setMaximumWidth(200)
-        sidebar_menu_box.setLayout(sidebar_menu)
+        main_layout = QVBoxLayout()
+        form = QFormLayout()
 
-        # Plots layout
-        self.plot_layout = QVBoxLayout()
-        self.figure = Figure(figsize=(5, 5))
-        self.plot_canvas = FigureCanvas(self.figure)
-        self.plot_layout.addWidget(self.plot_canvas)
+        self.plot_name = QLineEdit()
+        form.addRow("Proportion Plot Name:", self.plot_name)
+        main_layout.addLayout(form)
 
-        # Assemble layouts
-        full_layout = QHBoxLayout()
-        full_layout.addWidget(sidebar_menu_box)
-        full_layout.addLayout(self.plot_layout)
-        self.setLayout(full_layout)
+        # Scroll area for variable/color pairs
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_content.setLayout(self.scroll_layout)
+        self.scroll_area.setWidget(self.scroll_content)
+        main_layout.addWidget(self.scroll_area)
+        # Add Variable button inside scroll area, after pairs
+        self.add_var_btn = QPushButton("Add Variable")
+        self.add_var_btn.clicked.connect(self.add_variable_color_pair)
+        self.scroll_layout.addWidget(self.add_var_btn)
 
-        # Connect "Add Plots" button
-        self.add_button.clicked.connect(self.add_plots)
+        # Buttons to manage proportion plots
+        add_btn = QPushButton("Add Proportion Plot")
+        add_btn.clicked.connect(self.add_proportion_plot)
+        self.proportions_list = QListWidget()
+        rm_btn = QPushButton("Remove Selected Proportions")
+        rm_btn.clicked.connect(self.remove_selected_proportion)
+        main_layout.addWidget(add_btn)
+        main_layout.addWidget(QLabel("Added Proportions:"))
+        main_layout.addWidget(self.proportions_list)
+        main_layout.addWidget(rm_btn)
+        self.setLayout(main_layout)
 
-    def add_plots(self):
-        remaining_columns = [col for col in self.df.columns if col not in self.selected_columns]
-        dialog = PlotConfigDialog(self.df, remaining_columns, self)
-        if dialog.exec_() == QDialog.Accepted:
-            params = dialog.get_parameters()
-            print("User selected parameters:", params)
-            # TODO: use params to draw on self.figure
-            # Example:
-            self.figure.clear()
-            ax = self.figure.add_subplot(111)
-            var = params["curve"]["variable"]
-            depth = params["curve"]["depth"]
-            ax.plot(self.df[depth], self.df[var], color=params["curve"]["color"])
-            self.plot_canvas.draw()
+        # Add default variable-color row
+        if self.remaining_columns:
+            self.add_variable_color_pair()
+
+    def add_variable_color_pair(self):
+        """Add a new row with (variable combobox + color button + color display + remove button)."""
+        row_widget = QWidget()
+        row_layout = QHBoxLayout(row_widget)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Variable selector
+        variable_box = QComboBox()
+        variable_box.addItems(self.remaining_columns)
+        # Color choose button
+        color_btn = QPushButton("Choose Color")
+        color_display = QLabel()
+        color_display.setFixedSize(40, 20)
+        color_display.setStyleSheet("background-color: #cccccc; border: 1px solid black;")
+        # Color dialog
+        def choose_color():
+            color = QColorDialog.getColor(QColor("blue"), self, "Select Color")
+            if color.isValid():
+                color_display.setStyleSheet(f"background-color: {color.name()};")
+        color_btn.clicked.connect(choose_color)
+        # Remove variable-color pair
+        remove_btn = QPushButton("Remove")
+
+        def remove_row():
+            if len(self.variable_color_pairs) <= 1:
+                QMessageBox.warning(self, "Cannot Remove", "At least one variable-color pair is required.")
+                return
+            row_widget.setParent(None)
+            if (variable_box, color_display, row_widget) in self.variable_color_pairs:
+                self.variable_color_pairs.remove((variable_box, color_display, row_widget))
+
+        remove_btn.clicked.connect(remove_row)
+
+        # Assemble row
+        row_layout.addWidget(variable_box)
+        row_layout.addWidget(color_btn)
+        row_layout.addWidget(color_display)
+        row_layout.addWidget(remove_btn)
+
+        # Insert rows above the "Add Variable" button
+        idx = self.scroll_layout.indexOf(self.add_var_btn)
+        self.scroll_layout.insertWidget(idx, row_widget)
+
+        # Store references
+        self.variable_color_pairs.append((variable_box, color_display, row_widget))
+
+    def add_proportion_plot(self):
+        """Store current configuration (plot name, variable list, color list)."""
+        name = self.plot_name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing Name", "Please enter a name for the proportion plot.")
+            return
+
+        variable_list = []
+        color_list = []
+        for variable_box, color_display, _ in self.variable_color_pairs:
+            variable_list.append(variable_box.currentText())
+            style = color_display.styleSheet()
+            color = (
+                style.split("background-color:")[-1].split(";")[0].strip()
+                if "background-color" in style else "#cccccc"
+            )
+            color_list.append(color)
+
+        prop_info = {
+            "name": name,
+            "variable_list": variable_list,
+            "color_list": color_list
+        }
+
+        self.proportions.append(prop_info)
+
+        # Add to list widget
+        variables_str = ", ".join(f"{v} ({c})" for v, c in zip(variable_list, color_list))
+        item_text = f"{name}: {variables_str}"
+        self.proportions_list.addItem(QListWidgetItem(item_text))
+
+        # Reset for next plot
+        self.plot_name.clear()
+        for _, color_display, _ in self.variable_color_pairs:
+            color_display.setStyleSheet("background-color: #cccccc; border: 1px solid black;")
+
+    def remove_selected_proportion(self):
+        """Remove selected proportion configurations."""
+        selected = self.proportions_list.selectedItems()
+        if not selected:
+            QMessageBox.information(self, "No Selection", "Please select a proportion plot to remove.")
+            return
+
+        for item in selected:
+            idx = self.proportions_list.row(item)
+            self.proportions_list.takeItem(idx)
+            self.proportions.pop(idx)
+
+    def get_proportions(self):
+        """Return user selections as structured dict."""
+        return self.proportions
+
+# Canvas Tab
+class WellPlotCanvas(FigureCanvas):
+    def __init__(self, parent=None, width=5, height=4, dpi=100):
+        fig = Figure(figsize=(width, height), dpi=dpi)
+        self.ax = fig.add_subplot(111)
+        super().__init__(fig)
+        self.setParent(parent)
+
+    def plot_well_data(self, well_data, plot_params):
+        """Plot well data according to the provided parameters."""
+        self.ax.clear()
+        # Example plotting logic (to be replaced with actual implementation)
+        for curve in plot_params.get("curves", []):
+            var = curve["variable"]
+            if var in well_data.columns:
+                self.ax.plot(well_data["Depth"], well_data[var], label=curve["name"], color=curve["color"])
+        self.ax.set_xlabel("Depth")
+        self.ax.set_ylabel("Value")
+        self.ax.legend()
+        self.draw()

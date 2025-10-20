@@ -1,6 +1,6 @@
 import sys
 import pandas as pd
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox, QToolButton, QStyle
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox, QToolButton, QStyle, QComboBox
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
@@ -90,9 +90,9 @@ class WellLoggingViewer(QWidget):
         select_label = QLabel("Selected wells")
         info_layout.addWidget(select_label)
         info_btn = QToolButton()
-        info_btn.setToolTip("Right-click anywhere on the canvas to deselect")
+        info_btn.setToolTip("Left-click on the canvas to select wells.\nRight-click anywhere to clear your selection.")
         info_btn.setCursor(Qt.PointingHandCursor)
-        info_btn.setAutoRaise(True)   # flat look, like a small icon button
+        info_btn.setAutoRaise(True)
         info_btn.setFixedSize(16, 16)
         # Use the platform's standard "information" icon
         info_icon = info_btn.style().standardIcon(QStyle.SP_MessageBoxInformation)
@@ -126,8 +126,12 @@ class WellLoggingViewer(QWidget):
         self.add_button = QPushButton("Add Plots")
         self.add_button.clicked.connect(self.add_plots)
         sidebar_menu.addWidget(self.add_button)
-        self.well_list = QListWidget()
-        sidebar_menu.addWidget(self.well_list)
+        sidebar_menu.addWidget(QLabel("Wells"))
+        self.well_combo = QComboBox()
+        sidebar_menu.addWidget(self.well_combo)
+        sidebar_menu.addWidget(QLabel("Well depths"))
+        self.well_depth_list = QListWidget()
+        sidebar_menu.addWidget(self.well_depth_list)
         self.remove_selection = QPushButton("Remove selected depths")
         sidebar_menu.addWidget(self.remove_selection)
         sidebar_menu_box = QGroupBox("Plots Settings")
@@ -167,7 +171,6 @@ class WellLoggingViewer(QWidget):
                     well_column = self.selected_columns.get("Well ID")
                     if well_column and well_column in self.df.columns:
                         num_wells = self.df[well_column].nunique()
-                        self.well_list = self.df[well_column].unique()
                         self.well_count.setText(f"Number of wells: {num_wells}")
                     else:
                         self.well_count.setText("Number of wells:")
@@ -245,6 +248,10 @@ class WellLoggingViewer(QWidget):
         else:
             return
 
+    def load_wells(self):
+        self.well_combo.clear()
+        self.well_combo.addItems([str(well) for well in self.well_list])
+
     def add_plots(self):
         if self.df is not None:
             if self.selected_columns is not None:
@@ -253,7 +260,15 @@ class WellLoggingViewer(QWidget):
                 if dialog.exec_() == QDialog.Accepted:
                     params = dialog.get_parameters()
                     print("User selected parameters:", params)
-                    # TO DO: use params to draw on self.figure
+                    # Populate well list combo box
+                    well_column = self.selected_columns.get("Well ID")
+                    if well_column and well_column in self.df.columns:
+                        self.unique_wells = self.df[well_column].dropna().unique()
+                        self.well_combo.clear()
+                        self.well_combo.addItems([str(well) for well in self.unique_wells])
+                        
+                        # Use params to draw on self.figure
+                        
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
