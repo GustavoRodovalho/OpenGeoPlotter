@@ -253,21 +253,24 @@ class WellLoggingViewer(QWidget):
         self.well_combo.addItems([str(well) for well in self.well_list])
 
     def add_plots(self):
-        if self.df is not None:
-            if self.selected_columns is not None:
-                remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
-                dialog = PlotConfigDialog(self.df, remaining_columns, self)
-                if dialog.exec_() == QDialog.Accepted:
-                    params = dialog.get_parameters()
-                    print("User selected parameters:", params)
-                    # Populate well list combo box
-                    well_column = self.selected_columns.get("Well ID")
-                    if well_column and well_column in self.df.columns:
-                        self.unique_wells = self.df[well_column].dropna().unique()
-                        self.well_combo.clear()
-                        self.well_combo.addItems([str(well) for well in self.unique_wells])
-                        
-                        # Use params to draw on self.figure
+        if self.df is not None and self.selected_columns is not None:
+            remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
+            if not hasattr(self, "plot_config_dialog") or self.plot_config_dialog is None:
+                self.plot_config_dialog = PlotConfigDialog(self.df, remaining_columns, self)
+            dialog = self.plot_config_dialog
+            # Reuse existing dialog with current data
+            dialog.remaining_columns = remaining_columns
+            if dialog.exec_() == QDialog.Accepted:
+                params = dialog.get_parameters()
+                print("User selected parameters:", params)
+                # Populate well list combo box
+                well_column = self.selected_columns.get("Well ID")
+                if well_column and well_column in self.df.columns:
+                    self.unique_wells = self.df[well_column].dropna().unique()
+                    self.well_combo.clear()
+                    self.well_combo.addItems([str(well) for well in self.unique_wells])
+                    
+                    # Use params to draw on self.figure
                         
 
 if __name__ == "__main__":

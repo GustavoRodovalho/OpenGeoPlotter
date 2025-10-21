@@ -52,7 +52,7 @@ log_cols = [
 # Plot as a 2D color map
 n_logs = len(log_cols)
 fig = plt.figure(figsize=(2+n_logs*1.5, 8))
-gs = GridSpec(1, n_logs+1, width_ratios=[3] + [1]*n_logs, wspace=0.1)
+gs = GridSpec(2, n_logs+1, width_ratios=[3] + [1]*n_logs, height_ratios=[30,10], wspace=0.5, hspace=0.2)
 
 # Time series log
 ax0 = fig.add_subplot(gs[0,0])
@@ -61,7 +61,8 @@ ax0.set_xscale('log')
 ax0.set_xlabel('Time (s)')
 ax0.set_ylabel('Depth (m)')
 ax0.invert_yaxis()
-cbar = plt.colorbar(pcm,ax=ax0,pad=0.01)
+ax00 = fig.add_subplot(gs[1,0])
+cbar = plt.colorbar(pcm, cax=ax00, orientation='horizontal', pad=0.15, fraction=0.05)
 cbar.set_label('Amplitude')
 
 # Well logs
@@ -84,5 +85,5 @@ for i, col in enumerate(log_cols):
     ax.set_title(col, fontsize=6, pad=4)
 
 plt.title(f"Well Name: {df['Well Name'].unique()[well_idx]}", pad=15)
-# plt.tight_layout()
+plt.tight_layout()
 plt.show()

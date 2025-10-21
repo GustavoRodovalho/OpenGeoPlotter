@@ -304,7 +304,7 @@ class ProportionPlotTab(QWidget):
             self.add_variable_color_pair()
 
     def add_variable_color_pair(self):
-        """Add a new row with (variable combobox + color button + color display + remove button)."""
+        """Add a new row with (variable combobox + color button + color display + label edit + remove button)."""
         row_widget = QWidget()
         row_layout = QHBoxLayout(row_widget)
         row_layout.setContentsMargins(0, 0, 0, 0)
@@ -323,6 +323,10 @@ class ProportionPlotTab(QWidget):
             if color.isValid():
                 color_display.setStyleSheet(f"background-color: {color.name()};")
         color_btn.clicked.connect(choose_color)
+        # Label for each variable
+        label_edit = QLineEdit()
+        label_edit.setPlaceholderText("Label")
+        label_edit.setFixedWidth(80)
         # Remove variable-color pair
         remove_btn = QPushButton("Remove")
 
@@ -340,6 +344,7 @@ class ProportionPlotTab(QWidget):
         row_layout.addWidget(variable_box)
         row_layout.addWidget(color_btn)
         row_layout.addWidget(color_display)
+        row_layout.addWidget(label_edit)
         row_layout.addWidget(remove_btn)
 
         # Insert rows above the "Add Variable" button
@@ -347,10 +352,10 @@ class ProportionPlotTab(QWidget):
         self.scroll_layout.insertWidget(idx, row_widget)
 
         # Store references
-        self.variable_color_pairs.append((variable_box, color_display, row_widget))
+        self.variable_color_pairs.append((variable_box, color_display, label_edit, row_widget))
 
     def add_proportion_plot(self):
-        """Store current configuration (plot name, variable list, color list)."""
+        """Store current configuration (plot name, variable list, color list, label list)."""
         name = self.plot_name.text().strip()
         if not name:
             QMessageBox.warning(self, "Missing Name", "Please enter a name for the proportion plot.")
@@ -358,7 +363,8 @@ class ProportionPlotTab(QWidget):
 
         variable_list = []
         color_list = []
-        for variable_box, color_display, _ in self.variable_color_pairs:
+        label_list = []
+        for variable_box, color_display, label_edit, _ in self.variable_color_pairs:
             variable_list.append(variable_box.currentText())
             style = color_display.styleSheet()
             color = (
@@ -366,11 +372,14 @@ class ProportionPlotTab(QWidget):
                 if "background-color" in style else "#cccccc"
             )
             color_list.append(color)
+            label_text = label_edit.text().strip()
+            label_list.append(label_text if label_text else variable_box.currentText())
 
         prop_info = {
             "name": name,
             "variable_list": variable_list,
-            "color_list": color_list
+            "color_list": color_list,
+            "label_list": label_list
         }
 
         self.proportions.append(prop_info)
@@ -382,7 +391,7 @@ class ProportionPlotTab(QWidget):
 
         # Reset for next plot
         self.plot_name.clear()
-        for _, color_display, _ in self.variable_color_pairs:
+        for _, color_display, _, _ in self.variable_color_pairs:
             color_display.setStyleSheet("background-color: #cccccc; border: 1px solid black;")
 
     def remove_selected_proportion(self):
