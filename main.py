@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPu
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
-from well_plot import PlotConfigDialog
+from well_plot import PlotConfigDialog, GridSpecDialog
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -90,7 +90,7 @@ class WellLoggingViewer(QWidget):
         select_label = QLabel("Selected wells")
         info_layout.addWidget(select_label)
         info_btn = QToolButton()
-        info_btn.setToolTip("Left-click on the canvas to select wells.\nRight-click anywhere to clear your selection.")
+        info_btn.setToolTip("Left-click on the canvas to make a selection.\nRight-click anywhere to clear selected wells.")
         info_btn.setCursor(Qt.PointingHandCursor)
         info_btn.setAutoRaise(True)
         info_btn.setFixedSize(16, 16)
@@ -126,6 +126,9 @@ class WellLoggingViewer(QWidget):
         self.add_button = QPushButton("Add Plots")
         self.add_button.clicked.connect(self.add_plots)
         sidebar_menu.addWidget(self.add_button)
+        self.gridspec_button = QPushButton("GridSpec Settings")
+        self.gridspec_button.clicked.connect(self.gridspec_settings)
+        sidebar_menu.addWidget(self.gridspec_button)
         sidebar_menu.addWidget(QLabel("Wells"))
         self.well_combo = QComboBox()
         sidebar_menu.addWidget(self.well_combo)
@@ -261,17 +264,21 @@ class WellLoggingViewer(QWidget):
             # Reuse existing dialog with current data
             dialog.remaining_columns = remaining_columns
             if dialog.exec_() == QDialog.Accepted:
-                params = dialog.get_parameters()
-                print("User selected parameters:", params)
+                self.plots_params = dialog.get_parameters()
+                print("User selected parameters:", self.plots_params)
                 # Populate well list combo box
                 well_column = self.selected_columns.get("Well ID")
                 if well_column and well_column in self.df.columns:
                     self.unique_wells = self.df[well_column].dropna().unique()
                     self.well_combo.clear()
                     self.well_combo.addItems([str(well) for well in self.unique_wells])
-                    
-                    # Use params to draw on self.figure
-                        
+
+    def gridspec_settings(self):
+        if self.df is not None and self.selected_columns is not None and self.plots_params is not None:
+            dialog = GridSpecDialog(self.plots_params, self)
+            if dialog.exec_() == QDialog.Accepted:
+                self.gridspec_params = dialog.get_gridspec_parameters()
+                print("User selected GridSpec parameters:", self.gridspec_params)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

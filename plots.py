@@ -28,6 +28,7 @@ data = well_df.iloc[:, 7:37].values  # shape = (n_depths, n_times)
 sort_idx = np.argsort(depths)
 depths = depths[sort_idx]
 data = data[sort_idx, :]
+depth_min, depth_max = np.nanmin(depths), np.nanmax(depths)
 
 # Logs to plot
 log_cols = [
@@ -52,29 +53,63 @@ log_cols = [
 # Plot as a 2D color map
 n_logs = len(log_cols)
 fig = plt.figure(figsize=(2+n_logs*1.5, 8))
-gs = GridSpec(2, n_logs+1, width_ratios=[3] + [1]*n_logs, height_ratios=[30,10], wspace=0.5, hspace=0.2)
+gs = GridSpec(2, n_logs+2, width_ratios=[3]+[3]+[2]*n_logs, height_ratios=[30,1], wspace=0.5, hspace=0.2)
 
-# Time series log
+# -------------------------------------------- Time series log
 ax0 = fig.add_subplot(gs[0,0])
 pcm = ax0.pcolormesh(times, depths, data, shading='auto', cmap='viridis')
 ax0.set_xscale('log')
 ax0.set_xlabel('Time (s)')
+ax0.set_ylim(depth_max, depth_min)
 ax0.set_ylabel('Depth (m)')
 ax0.invert_yaxis()
 ax00 = fig.add_subplot(gs[1,0])
 cbar = plt.colorbar(pcm, cax=ax00, orientation='horizontal', pad=0.15, fraction=0.05)
 cbar.set_label('Amplitude')
 
-# Well logs
+# -------------------------------------------- Proportion plot
+prop_cols = ["Lithogeochemical/Ca", "Lithogeochemical/Si", "Lithogeochemical/Fe"]
+well_df["sum_elements"] = well_df[prop_cols].sum(axis=1)
+for col in prop_cols:
+    well_df[f"{col}_prop"] = well_df[col] / well_df["sum_elements"]
+#
+well_df = well_df.sort_values("TVD").reset_index(drop=True)
+depths = well_df["TVD"].values
+#
+ax1 = fig.add_subplot(gs[0,1], sharey=ax0)
+colors = {
+    "Lithogeochemical/Ca_prop": "lightblue",
+    "Lithogeochemical/Si_prop": "gold",
+    "Lithogeochemical/Fe_prop": "darkred"
+}
+bottom = np.zeros(len(well_df))
+# Plot stacked horizontal bars
+for col, color in colors.items():
+    ax1.barh(depths, well_df[col], left=bottom, color=color, label=col.split('/')[-2])
+    bottom += well_df[col].values
+# Formatting
+# ax1.set_xlabel("Proportion")
+# ax1.invert_yaxis()  # Depth increases downward
+ax1.set_xlim(0, 1)
+ax1.set_ylim(depth_max, depth_min)
+ax1.set_yticklabels([])  # only leftmost has depth labels
+# Create a dedicated legend axis below (gs[1,1])
+ax1_leg = fig.add_subplot(gs[1, 1])
+ax1_leg.axis("off")  # hide axes
+handles, labels = ax1.get_legend_handles_labels()
+ax1_leg.legend(handles, labels, title="", loc="center", ncol=1, frameon=False)
+
+# -------------------------------------------- Well logs
 for i, col in enumerate(log_cols):
-    ax = fig.add_subplot(gs[0, i+1], sharey=ax0)
+    ax = fig.add_subplot(gs[0, i+2], sharey=ax0)
     log_data = well_df[col].values[sort_idx]
     
     ax.plot(log_data, depths, color="black", linewidth=0.8)
     ax.set_xlabel(col.split("/")[-1], fontsize=6)  # shorter label
-    ax.invert_yaxis()
+    # ax.invert_yaxis()
     ax.grid(True, linestyle=":", alpha=0.4)
     ax.set_yticklabels([])  # only leftmost has depth labels
+    ax.set_ylim(depth_max, depth_min)
     
     # Optional: auto limits with small padding
     finite_data = log_data[np.isfinite(log_data)]
@@ -85,5 +120,5 @@ for i, col in enumerate(log_cols):
     ax.set_title(col, fontsize=6, pad=4)
 
 plt.title(f"Well Name: {df['Well Name'].unique()[well_idx]}", pad=15)
-plt.tight_layout()
+# plt.tight_layout()
 plt.show()

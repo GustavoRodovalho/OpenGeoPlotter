@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QFormLayout, QSpinBox, QLineEdit, QDialogButtonBox,
     QListWidgetItem, QColorDialog, QMessageBox, QCheckBox, QScrollArea
 )
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -80,6 +81,7 @@ class CurvePlotTab(QWidget):
         # Curve Name
         self.curve_name = QLineEdit()
         form.addRow("Curve Name:", self.curve_name)
+        self.var_combo.currentTextChanged.connect(self.update_curve_name)
         # Curve Color (clickable button)
         color_layout = QHBoxLayout()
         self.color_display = QLineEdit()
@@ -108,6 +110,12 @@ class CurvePlotTab(QWidget):
         layout.addWidget(remove_btn)
 
         self.setLayout(layout)
+
+    def update_curve_name(self, var_name):
+        """Auto-fill the curve name with the selected variable (if user hasn’t typed anything)."""
+        # Only overwrite if user hasn’t customized the name
+        if not self.curve_name.text().strip():
+            self.curve_name.setText(var_name)
 
     def choose_color(self):
         color = QColorDialog.getColor(QColor("blue"), self, "Select Curve Color")
@@ -410,9 +418,101 @@ class ProportionPlotTab(QWidget):
         """Return user selections as structured dict."""
         return self.proportions
 
+class GridSpecDialog(QDialog):
+    def __init__(self, plot_params, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("GridSpec Plot Configuration")
+        self.resize(700, 500)
+
+        self.plot_params = plot_params
+
+        main_layout = QVBoxLayout(self)
+
+        # Plot ordering
+        order_group = QGroupBox("Plot Order (Drag to Reorder)")
+        order_layout = QHBoxLayout(order_group)
+        # Curves list
+        self.curves_list = self._create_list_widget(plot_params.get("curves", []), "Curves")
+        order_layout.addWidget(self.curves_list)
+        # Time Series list
+        self.series_list = self._create_list_widget(plot_params.get("time series", []), "Time Series")
+        order_layout.addWidget(self.series_list)
+        # Proportions list
+        self.prop_list = self._create_list_widget(plot_params.get("proportions", []), "Proportions")
+        order_layout.addWidget(self.prop_list)
+
+        main_layout.addWidget(order_group)
+
+        # GridSpec parameters
+        config_group = QGroupBox("GridSpec Parameters")
+        form = QFormLayout(config_group)
+
+        self.width_ratios_edit = QLineEdit("1,3,5")
+        self.height_ratios_edit = QLineEdit("30,1")
+        self.wspace_edit = QLineEdit("0.5")
+        self.hspace_edit = QLineEdit("0.2")
+
+        form.addRow("Width ratios (curves, series, proportions):", self.width_ratios_edit)
+        form.addRow("Height ratios (plots, legends):", self.height_ratios_edit)
+        form.addRow("Horizontal space (wspace):", self.wspace_edit)
+        form.addRow("Vertical space (hspace):", self.hspace_edit)
+
+        main_layout.addWidget(config_group)
+
+        # Buttons
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        main_layout.addWidget(buttons)
+
+    # Helpers
+    def _create_list_widget(self, items, title):
+        group = QGroupBox(title)
+        vlayout = QVBoxLayout(group)
+        lw = QListWidget()
+        lw.setDragDropMode(QListWidget.InternalMove)
+        for obj in items:
+            item = QListWidgetItem(obj.get("name", "Unnamed"))
+            lw.addItem(item)
+        vlayout.addWidget(lw)
+        return group
+
+    def get_gridspec_parameters(self):
+        """Return user-configured GridSpec parameters."""
+        try:
+            width_ratios = [float(x.strip()) for x in self.width_ratios_edit.text().split(",") if x.strip()]
+            height_ratios = [float(x.strip()) for x in self.height_ratios_edit.text().split(",") if x.strip()]
+            wspace = float(self.wspace_edit.text())
+            hspace = float(self.hspace_edit.text())
+
+            # Retrieve reordered names from lists
+            curves_order = [self.curves_list.findChild(QListWidget).item(i).text() 
+                            for i in range(self.curves_list.findChild(QListWidget).count())]
+            series_order = [self.series_list.findChild(QListWidget).item(i).text() 
+                            for i in range(self.series_list.findChild(QListWidget).count())]
+            prop_order = [self.prop_list.findChild(QListWidget).item(i).text() 
+                          for i in range(self.prop_list.findChild(QListWidget).count())]
+
+            return {
+                "orders": {
+                    "curves": curves_order,
+                    "time series": series_order,
+                    "proportions": prop_order,
+                },
+                "gridspec": {
+                    "width_ratios": width_ratios,
+                    "height_ratios": height_ratios,
+                    "wspace": wspace,
+                    "hspace": hspace,
+                }
+            }
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid Input", f"Check your numeric inputs:\n{e}")
+            return None
+
 # Canvas Tab
-class WellPlotCanvas(FigureCanvas):
-    def __init__(self, parent=None, width=5, height=4, dpi=100):
+class WellVisualizerFigure(FigureCanvas):
+    def __init__(self, plot_params, gridspec_params, parent=None):
         fig = Figure(figsize=(width, height), dpi=dpi)
         self.ax = fig.add_subplot(111)
         super().__init__(fig)
