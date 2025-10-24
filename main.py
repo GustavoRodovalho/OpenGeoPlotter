@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPu
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
-from well_plot import PlotConfigDialog, GridSpecDialog
+from well_plot import PlotConfigDialog, GridSpecDialog, WellPlotter
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -179,6 +179,23 @@ class WellLoggingViewer(QWidget):
                         self.well_count.setText("Number of wells:")
 
                 # Variables types
+                # Transform depth and coordinates into numeric
+                depth_col = self.selected_columns.get("Depth")
+                if depth_col and depth_col in self.df.columns:
+                    self.df[depth_col] = pd.to_numeric(self.df[depth_col].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                if "Latitude" in self.selected_columns:
+                    lat_col = self.selected_columns.get("Latitude")
+                    lon_col = self.selected_columns.get("Longitude")
+                    if lat_col and lon_col and lat_col in self.df.columns and lon_col in self.df.columns:
+                        self.df[lon_col] = pd.to_numeric(self.df[lon_col].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                        self.df[lat_col] = pd.to_numeric(self.df[lat_col].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                if "X" in self.selected_columns:
+                    x_col = self.selected_columns.get("X")
+                    y_col = self.selected_columns.get("Y")
+                    if x_col and y_col and x_col in self.df.columns and y_col in self.df.columns:
+                        self.df[x_col] = pd.to_numeric(self.df[x_col].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                        self.df[y_col] = pd.to_numeric(self.df[y_col].astype(str).str.replace(",", ".", regex=False), errors="coerce")
+                # Transform other selected columns based on user input
                 type_dialog = VariableTypeDialog(self.df, self.selected_columns)
                 if type_dialog.exec_() == QDialog.Accepted:
                     type_map = type_dialog.get_type_map()

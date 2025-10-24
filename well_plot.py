@@ -7,7 +7,11 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.gridspec import GridSpec
 from matplotlib.figure import Figure
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 # Plot Configuration Dialog with Tabs
 class PlotConfigDialog(QDialog):
@@ -511,22 +515,148 @@ class GridSpecDialog(QDialog):
             return None
 
 # Canvas Tab
-class WellVisualizerFigure(FigureCanvas):
-    def __init__(self, plot_params, gridspec_params, parent=None):
-        fig = Figure(figsize=(width, height), dpi=dpi)
-        self.ax = fig.add_subplot(111)
-        super().__init__(fig)
-        self.setParent(parent)
+# class WellVisualizerFigure(FigureCanvas):
+#     def __init__(self, plot_params, gridspec_params, parent=None):
+#         fig = Figure(figsize=(width, height), dpi=dpi)
+#         self.ax = fig.add_subplot(111)
+#         super().__init__(fig)
+#         self.setParent(parent)
 
-    def plot_well_data(self, well_data, plot_params):
-        """Plot well data according to the provided parameters."""
-        self.ax.clear()
-        # Example plotting logic (to be replaced with actual implementation)
-        for curve in plot_params.get("curves", []):
-            var = curve["variable"]
-            if var in well_data.columns:
-                self.ax.plot(well_data["Depth"], well_data[var], label=curve["name"], color=curve["color"])
-        self.ax.set_xlabel("Depth")
-        self.ax.set_ylabel("Value")
-        self.ax.legend()
-        self.draw()
+#     def plot_well_data(self, well_data, plot_params):
+#         """Plot well data according to the provided parameters."""
+#         self.ax.clear()
+#         # Example plotting logic (to be replaced with actual implementation)
+#         for curve in plot_params.get("curves", []):
+#             var = curve["variable"]
+#             if var in well_data.columns:
+#                 self.ax.plot(well_data["Depth"], well_data[var], label=curve["name"], color=curve["color"])
+#         self.ax.set_xlabel("Depth")
+#         self.ax.set_ylabel("Value")
+#         self.ax.legend()
+#         self.draw()
+
+class WellPlotter:
+    def __init__(self, figure: Figure):
+        """
+        Class responsible for plotting well logs, time series and proportions.
+        It uses a Matplotlib Figure provided by the parent PyQt widget.
+        """
+        self.figure = figure
+        self.df = None
+        self.current_well = None
+        self.selected_params = None
+        self.gridspec_params = None
+
+    # ----------------------------
+    # DATA HANDLING
+    # ----------------------------
+    def load_data(self, filepath: str, sep: str = ";"):
+        """Load CSV and clean numeric data (comma to dot)."""
+        self.df = pd.read_csv(filepath, sep=sep, low_memory=False)
+        for col in self.df.columns[1:]:
+            self.df[col] = self.df[col].astype(str).str.replace(",", ".", regex=False)
+            self.df[col] = pd.to_numeric(self.df[col], errors="coerce")
+
+    def set_well(self, well_name: str):
+        """Define which well to plot."""
+        if self.df is not None and well_name in self.df["Well Name"].unique():
+            self.current_well = well_name
+        else:
+            raise ValueError("Invalid well name or dataset not loaded.")
+
+    def set_plot_params(self, selected_params: dict, gridspec_params: dict):
+        """Define what variables, colors, colormaps, etc. will be plotted."""
+        self.selected_params = selected_params
+        self.gridspec_params = gridspec_params
+
+    # ----------------------------
+    # PLOTTING FUNCTION
+    # ----------------------------
+    def plot(self):
+        """Generate the plot in the provided Figure."""
+        if any(v is None for v in [self.df, self.current_well, self.selected_params, self.gridspec_params]):
+            raise RuntimeError("Data, well, or parameters not set before plotting.")
+
+        self.figure.clear()
+
+        well_df = self.df.loc[self.df['Well Name'] == self.current_well, :].copy()
+        depths = well_df['TVD'].values
+        depth_max, depth_min = np.nanmax(depths), np.nanmin(depths)
+
+        n_curves = len(self.selected_params['curves'])
+        n_series = len(self.selected_params['time series'])
+        n_proportions = len(self.selected_params['proportions'])
+        n_cols = n_curves + n_series + n_proportions
+
+        width_ratios = []
+        for w, i in zip(self.gridspec_params['gridspec']['width_ratios'], [n_curves, n_series, n_proportions]):
+            width_ratios += [w] * i
+
+        gs = GridSpec(
+            2, n_cols,
+            figure=self.figure,
+            width_ratios=width_ratios,
+            height_ratios=self.gridspec_params['gridspec']['height_ratios'],
+            wspace=self.gridspec_params['gridspec']['wspace'],
+            hspace=self.gridspec_params['gridspec']['hspace']
+        )
+
+        # ---- Curves ----
+        for i, curve in enumerate(self.selected_params['curves']):
+            ax = self.figure.add_subplot(gs[0, i])
+            curve_data = well_df[curve['variable']].values
+            ax.plot(curve_data, depths, color=curve['color'], linewidth=0.8)
+            ax.set_xlabel(curve['unit'], fontsize=6)
+            ax.grid(True, linestyle=":", alpha=0.4)
+            ax.set_ylim(depth_max, depth_min)
+            finite_data = curve_data[np.isfinite(curve_data)]
+            if len(finite_data) > 0:
+                xmin, xmax = np.nanpercentile(finite_data, [2, 98])
+                ax.set_xlim(xmin, xmax)
+            if i == 0:
+                ax.set_ylabel('Depth (m)')
+            else:
+                ax.set_yticklabels([])
+            ax.set_title(curve['name'], fontsize=6, pad=4)
+
+        # ---- Time Series ----
+        for i, series in enumerate(self.selected_params['time series']):
+            time_cols = well_df.loc[:, series['start_col']:series['end_col']].columns
+            times = time_cols.to_series().str.extract(r'([\d\.eE+-]+)').astype(float)[0].values
+            data = well_df.loc[:, series['start_col']:series['end_col']].values
+            ax = self.figure.add_subplot(gs[0, n_curves + i])
+            pcm = ax.pcolormesh(times, depths, data, shading='auto', cmap=series['colormap'])
+            if series['logscale']:
+                ax.set_xscale('log')
+            ax.set_xlabel('Time')
+            ax.set_ylim(depth_max, depth_min)
+            ax.set_title(series['name'], fontsize=6, pad=4)
+            ax0 = self.figure.add_subplot(gs[1, n_curves + i])
+            cbar = plt.colorbar(pcm, cax=ax0, orientation='horizontal', pad=0.15, fraction=0.05)
+
+        # ---- Proportions ----
+        for i, prop in enumerate(self.selected_params['proportions']):
+            well_df["sum_elements"] = well_df[prop['variable_list']].sum(axis=1)
+            for var in prop['variable_list']:
+                well_df[f"{var}_prop"] = well_df[var] / well_df["sum_elements"]
+            well_df = well_df.sort_values("TVD").reset_index(drop=True)
+            depths = well_df["TVD"].values
+            ax = self.figure.add_subplot(gs[0, n_curves + n_series + i])
+            bottom = np.zeros(len(well_df))
+            for var, color, label in zip(prop['variable_list'], prop['color_list'], prop['label_list']):
+                ax.barh(depths, well_df[f"{var}_prop"], left=bottom, color=color, label=label)
+                bottom += well_df[f"{var}_prop"].values
+            ax.set_xlim(0, 1)
+            ax.set_ylim(depth_max, depth_min)
+            if (n_curves + n_series + i) > 0:
+                ax.set_yticklabels([])
+            ax.set_title(prop['name'], fontsize=6, pad=4)
+            ax_leg = self.figure.add_subplot(gs[1, n_curves + n_series + i])
+            ax_leg.axis("off")
+            handles, labels = ax.get_legend_handles_labels()
+            ax_leg.legend(handles, labels, loc="center", ncol=1, frameon=False)
+
+        # ---- Final adjustments ----
+        self.figure.suptitle(f"Well: {self.current_well}", fontsize=8)
+        self.figure.tight_layout()
+        self.figure.canvas.draw_idle()
