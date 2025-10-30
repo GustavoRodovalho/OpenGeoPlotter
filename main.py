@@ -4,7 +4,8 @@ from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPu
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
-from well_plot import PlotConfigDialog, GridSpecDialog, WellPlotter
+# from well_plot import PlotConfigDialog, GridSpecDialog, WellPlotter
+from log_viewer import LogViewer
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -123,34 +124,29 @@ class WellLoggingViewer(QWidget):
         # Tab 3: Well visualizer
         self.visualizer_tab = QWidget()
         sidebar_menu = QVBoxLayout()
-        self.add_button = QPushButton("Add Plots")
-        self.add_button.clicked.connect(self.add_plots)
-        sidebar_menu.addWidget(self.add_button)
-        self.gridspec_button = QPushButton("GridSpec Settings")
-        self.gridspec_button.clicked.connect(self.gridspec_settings)
-        sidebar_menu.addWidget(self.gridspec_button)
-        sidebar_menu.addWidget(QLabel("Wells"))
+        self.add_button = QPushButton("Add Curve")
         self.well_combo = QComboBox()
+        self.well_depth_list = QListWidget()
+        self.remove_selection = QPushButton("Remove selected depths")
+        sidebar_menu.addWidget(self.add_button)
+        sidebar_menu.addWidget(QLabel("Wells"))
         sidebar_menu.addWidget(self.well_combo)
         sidebar_menu.addWidget(QLabel("Well depths"))
-        self.well_depth_list = QListWidget()
         sidebar_menu.addWidget(self.well_depth_list)
-        self.remove_selection = QPushButton("Remove selected depths")
         sidebar_menu.addWidget(self.remove_selection)
         sidebar_menu_box = QGroupBox("Plots Settings")
         sidebar_menu_box.setMaximumWidth(200)
         sidebar_menu_box.setLayout(sidebar_menu)
-        # Plots layout
-        self.plot_layout = QVBoxLayout()
-        self.figure = Figure(figsize=(5, 5))
-        self.plot_canvas = FigureCanvas(self.figure)
-        self.plot_layout.addWidget(self.plot_canvas)
+        # Log Viewer widget
+        self.log_viewer = LogViewer()
+        self.add_button.clicked.connect(self.log_viewer.add_curve)
         # Assemble layouts
         full_layout = QHBoxLayout()
         full_layout.addWidget(sidebar_menu_box)
-        full_layout.addLayout(self.plot_layout)
+        full_layout.addWidget(self.log_viewer)
         self.visualizer_tab.setLayout(full_layout)
-        self.tabs.addTab(self.visualizer_tab, "Well Visualizer")
+        # Add to main tabs
+        self.tabs.addTab(self.visualizer_tab, "Well Viewer")
 
         self.setLayout(main_layout)
 
