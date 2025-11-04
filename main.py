@@ -5,7 +5,7 @@ from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
 # from well_plot import PlotConfigDialog, GridSpecDialog, WellPlotter
-from log_viewer import LogViewer
+from log_viewer import LogViewer, CurveSelectionDialog
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -124,11 +124,13 @@ class WellLoggingViewer(QWidget):
         # Tab 3: Well visualizer
         self.visualizer_tab = QWidget()
         sidebar_menu = QVBoxLayout()
-        self.add_button = QPushButton("Add Curve")
+        self.add_button = QPushButton("Add Tracks")
+        self.clear_track_button = QPushButton("Clear Tracks")
         self.well_combo = QComboBox()
         self.well_depth_list = QListWidget()
         self.remove_selection = QPushButton("Remove selected depths")
         sidebar_menu.addWidget(self.add_button)
+        sidebar_menu.addWidget(self.clear_track_button)
         sidebar_menu.addWidget(QLabel("Wells"))
         sidebar_menu.addWidget(self.well_combo)
         sidebar_menu.addWidget(QLabel("Well depths"))
@@ -139,7 +141,8 @@ class WellLoggingViewer(QWidget):
         sidebar_menu_box.setLayout(sidebar_menu)
         # Log Viewer widget
         self.log_viewer = LogViewer()
-        self.add_button.clicked.connect(self.log_viewer.add_curve)
+        self.add_button.clicked.connect(self.add_tracks)
+        self.clear_track_button.clicked.connect(self.log_viewer.clear_tracks)
         # Assemble layouts
         full_layout = QHBoxLayout()
         full_layout.addWidget(sidebar_menu_box)
@@ -267,6 +270,25 @@ class WellLoggingViewer(QWidget):
     def load_wells(self):
         self.well_combo.clear()
         self.well_combo.addItems([str(well) for well in self.well_list])
+
+    def add_tracks(self):
+        if self.df is not None and self.selected_columns is not None:
+            dialog = CurveSelectionDialog(self.df, self)
+            if dialog.exec_() == QDialog.Accepted:
+                selected_curve = dialog.get_selection()
+                if selected_curve:
+                    depth_col = self.selected_columns.get("Depth")
+                    if depth_col and depth_col in self.df.columns:
+                        depth_data = pd.to_numeric(self.df[depth_col], errors="coerce").dropna().values
+                        curve_data = pd.to_numeric(self.df[selected_curve], errors="coerce").dropna().values
+                        if len(depth_data) == len(curve_data):
+                            self.log_viewer.add_curve(depth_data, curve_data, selected_curve)
+                        else:
+                            QMessageBox.warning(self, "Data length mismatch", "Depth and curve data lengths do not match.")
+                    else:
+                        QMessageBox.warning(self, "Missing Depth", "The 'Depth' column must be specified.")
+                else:
+                    QMessageBox.warning(self, "No Curve Selected", "Please select a curve to add.")
 
     def add_plots(self):
         if self.df is not None and self.selected_columns is not None:

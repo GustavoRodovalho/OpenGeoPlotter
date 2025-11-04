@@ -1,24 +1,38 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox,
-    QListWidget, QGroupBox, QScrollArea, QSplitter
+    QListWidget, QGroupBox, QScrollArea, QSplitter, QDialog, QFormLayout,
+    QDialogButtonBox
 )
 import pyqtgraph as pg
 import numpy as np
 
+class CurveSelectionDialog(QDialog):
+    """Dialog to select a curve (column) from a pandas DataFrame."""
+    def __init__(self, df, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Curve")
+        self.df = df
+        self.selected_column = None
+
+        layout = QFormLayout(self)
+        self.curve_combo = QComboBox()
+        self.curve_combo.addItems(self.df.columns)
+        layout.addRow("Curve:", self.curve_combo)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_selection(self):
+        if self.exec_() == QDialog.Accepted:
+            return self.curve_combo.currentText()
+        return None
 
 class LogViewer(QWidget):
     """Well log viewer widget (depth track + scrollable tracks)."""
     def __init__(self, parent=None):
         super().__init__(parent)
-
-        # Depth track
-        self.depth_plot = pg.PlotWidget()
-        self.depth_plot.setFixedWidth(80)
-        self.depth_plot.invertY(True)
-        self.depth_plot.hideAxis('bottom')
-        self.depth_plot.showAxis('left', True)
-        self.depth_plot.setLabel('left', 'Depth (m)')
-        self.depth_plot.setMouseEnabled(x=False, y=True)
 
         # Container for tracks
         self.tracks_container = QWidget()
@@ -33,7 +47,7 @@ class LogViewer(QWidget):
 
         # Splitter: depth sidebar + tracks
         self.splitter = QSplitter()
-        self.splitter.addWidget(self.depth_plot)
+        # self.splitter.addWidget(self.depth_plot)
         self.splitter.addWidget(self.scroll_area)
 
         layout = QVBoxLayout(self)
@@ -42,7 +56,7 @@ class LogViewer(QWidget):
         # Data setup
         self.tracks = []
         self.depth = np.linspace(0, 3000, 500)
-        self.depth_plot.plot([0] * len(self.depth), self.depth, pen=None)  # Depth axis guide
+        # self.depth_plot.plot([0] * len(self.depth), self.depth, pen=None)  # Depth axis guide
 
     def add_curve(self):
         """Add a random curve track linked to the depth axis."""
@@ -55,7 +69,14 @@ class LogViewer(QWidget):
         track.setLabel('bottom', f'Curve {len(self.tracks) + 1}')
 
         # Link Y axis to the depth axis
-        track.getViewBox().setYLink(self.depth_plot.getViewBox())
+        # track.getViewBox().setYLink(self.depth_plot.getViewBox())
 
         self.tracks_layout.addWidget(track)
         self.tracks.append(track)
+
+    def clear_tracks(self):
+        """Clear all tracks."""
+        for track in self.tracks:
+            self.tracks_layout.removeWidget(track)
+            track.deleteLater()
+        self.tracks = []
