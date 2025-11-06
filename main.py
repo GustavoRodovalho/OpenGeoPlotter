@@ -5,7 +5,7 @@ from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
 # from well_plot import PlotConfigDialog, GridSpecDialog, WellPlotter
-from log_viewer import LogViewer, CurveSelectionDialog
+from log_viewer import LogViewer, TrackSelectionDialog
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -121,16 +121,14 @@ class WellLoggingViewer(QWidget):
         self.loc_tab.setLayout(combined_layout)
         self.tabs.addTab(self.loc_tab, "Localization Map")
 
-        # Tab 3: Well visualizer
+        # Tab 3: Well Viewer
         self.visualizer_tab = QWidget()
         sidebar_menu = QVBoxLayout()
         self.add_button = QPushButton("Add Tracks")
-        self.clear_track_button = QPushButton("Clear Tracks")
         self.well_combo = QComboBox()
         self.well_depth_list = QListWidget()
         self.remove_selection = QPushButton("Remove selected depths")
         sidebar_menu.addWidget(self.add_button)
-        sidebar_menu.addWidget(self.clear_track_button)
         sidebar_menu.addWidget(QLabel("Wells"))
         sidebar_menu.addWidget(self.well_combo)
         sidebar_menu.addWidget(QLabel("Well depths"))
@@ -142,7 +140,7 @@ class WellLoggingViewer(QWidget):
         # Log Viewer widget
         self.log_viewer = LogViewer()
         self.add_button.clicked.connect(self.add_tracks)
-        self.clear_track_button.clicked.connect(self.log_viewer.clear_tracks)
+        self.well_combo.currentTextChanged.connect(self.update_log_viewer)
         # Assemble layouts
         full_layout = QHBoxLayout()
         full_layout.addWidget(sidebar_menu_box)
@@ -169,7 +167,7 @@ class WellLoggingViewer(QWidget):
                 # Show .csv options dialog
                 options_dialog = CSVOptions(self.df)
                 if options_dialog.exec_() == QDialog.Accepted:
-                    self.selected_columns = options_dialog.get_selected_columns()
+                    self.selected_columns = options_dialog.get_selected_columns() # Well ID, Depth and coordinates
                     well_column = self.selected_columns.get("Well ID")
                     if well_column and well_column in self.df.columns:
                         num_wells = self.df[well_column].nunique()
@@ -273,47 +271,56 @@ class WellLoggingViewer(QWidget):
 
     def add_tracks(self):
         if self.df is not None and self.selected_columns is not None:
-            dialog = CurveSelectionDialog(self.df, self)
+            dialog = TrackSelectionDialog(self.df, self.selected_columns, self)
             if dialog.exec_() == QDialog.Accepted:
-                selected_curve = dialog.get_selection()
-                if selected_curve:
-                    depth_col = self.selected_columns.get("Depth")
-                    if depth_col and depth_col in self.df.columns:
-                        depth_data = pd.to_numeric(self.df[depth_col], errors="coerce").dropna().values
-                        curve_data = pd.to_numeric(self.df[selected_curve], errors="coerce").dropna().values
-                        if len(depth_data) == len(curve_data):
-                            self.log_viewer.add_curve(depth_data, curve_data, selected_curve)
-                        else:
-                            QMessageBox.warning(self, "Data length mismatch", "Depth and curve data lengths do not match.")
-                    else:
-                        QMessageBox.warning(self, "Missing Depth", "The 'Depth' column must be specified.")
-                else:
-                    QMessageBox.warning(self, "No Curve Selected", "Please select a curve to add.")
-
-    def add_plots(self):
-        if self.df is not None and self.selected_columns is not None:
-            remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
-            if not hasattr(self, "plot_config_dialog") or self.plot_config_dialog is None:
-                self.plot_config_dialog = PlotConfigDialog(self.df, remaining_columns, self)
-            dialog = self.plot_config_dialog
-            # Reuse existing dialog with current data
-            dialog.remaining_columns = remaining_columns
-            if dialog.exec_() == QDialog.Accepted:
-                self.plots_params = dialog.get_parameters()
-                print("User selected parameters:", self.plots_params)
-                # Populate well list combo box
-                well_column = self.selected_columns.get("Well ID")
-                if well_column and well_column in self.df.columns:
-                    self.unique_wells = self.df[well_column].dropna().unique()
+                selected_curves = dialog.get_selected_curves()
+                if selected_curves:
+                    print("User selected tracks:", selected_curves)
+                    # Save the selection in an attribute or pass to your LogViewer
+                    self.selected_tracks = selected_curves
+                    # Now add unique wells in the Combo Box
                     self.well_combo.clear()
-                    self.well_combo.addItems([str(well) for well in self.unique_wells])
+                    well_column = self.selected_columns.get("Well ID")
+                    self.unique_wells = self.df[well_column].dropna().unique()
+                    self.well_combo.addItems([""]+[str(well) for well in self.unique_wells])
+                    # When the user select an item in the Combo Box, update the LogViewer with the selected tracks for that well
+                    # self.log_viewer.add_tracks(selected_curves)
 
-    def gridspec_settings(self):
-        if self.df is not None and self.selected_columns is not None and self.plots_params is not None:
-            dialog = GridSpecDialog(self.plots_params, self)
-            if dialog.exec_() == QDialog.Accepted:
-                self.gridspec_params = dialog.get_gridspec_parameters()
-                print("User selected GridSpec parameters:", self.gridspec_params)
+    def update_log_viewer(self, well_name):
+        if well_name.strip():
+            df_well = self.df[self.df[self.selected_columns.get("Well ID")] == well_name]
+            df_depths = df_well[[self.selected_columns.get("Depth")]]
+            df_curves = df_well[[col for col in self.selected_tracks if col in df_well.columns]]
+            self.log_viewer.update_tracks(df_depths, df_curves)
+        #     df_well = self.df[self.df[well_column] == well_id]
+        #     self.log_viewer.add_tracks(df_well, depth_column, selected_curves)
+        # else:
+        #     self.log_viewer.clear_tracks()
+
+    # def add_plots(self):
+    #     if self.df is not None and self.selected_columns is not None:
+    #         remaining_columns = [col for col in self.df.columns if col not in set(col for col in self.selected_columns.values() if col)]
+    #         if not hasattr(self, "plot_config_dialog") or self.plot_config_dialog is None:
+    #             self.plot_config_dialog = PlotConfigDialog(self.df, remaining_columns, self)
+    #         dialog = self.plot_config_dialog
+    #         # Reuse existing dialog with current data
+    #         dialog.remaining_columns = remaining_columns
+    #         if dialog.exec_() == QDialog.Accepted:
+    #             self.plots_params = dialog.get_parameters()
+    #             print("User selected parameters:", self.plots_params)
+    #             # Populate well list combo box
+    #             well_column = self.selected_columns.get("Well ID")
+    #             if well_column and well_column in self.df.columns:
+    #                 self.unique_wells = self.df[well_column].dropna().unique()
+    #                 self.well_combo.clear()
+    #                 self.well_combo.addItems([str(well) for well in self.unique_wells])
+
+    # def gridspec_settings(self):
+    #     if self.df is not None and self.selected_columns is not None and self.plots_params is not None:
+    #         dialog = GridSpecDialog(self.plots_params, self)
+    #         if dialog.exec_() == QDialog.Accepted:
+    #             self.gridspec_params = dialog.get_gridspec_parameters()
+    #             print("User selected GridSpec parameters:", self.gridspec_params)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
