@@ -148,12 +148,22 @@ class LogViewer(QWidget):
             else:
                 track.setYLink(reference_track)
 
-            track.scene().sigMouseClicked.connect(lambda event, tr=track: self.add_selection_region(tr, event))
+            track.scene().sigMouseClicked.connect(lambda event, tr=track: self.handle_mouse_click(tr, event))
 
             self.tracks_layout.addWidget(track)
             self.tracks.append(track)
         
         self.tracks_container.adjustSize()
+
+    def handle_mouse_click(self, track, event):
+        """Handle left-click (add) and right-click (remove last)."""
+        if not track.sceneBoundingRect().contains(event.scenePos()):
+            return
+
+        if event.button() == Qt.LeftButton:
+            self.add_selection_region(track, event)
+        elif event.button() == Qt.RightButton:
+            self.remove_last_region(track)
 
     def add_selection_region(self, track, event):
         """Add a selection region on the clicked track."""
@@ -166,9 +176,19 @@ class LogViewer(QWidget):
         region.setRegion([self.depths.min(), self.depths.max()])  # default range
         region.sigRegionChanged.connect(lambda: self.on_region_changed(region))
         track.addItem(region)
-        self.selected_regions.append(region)
+        self.selected_regions.append((track, region))
 
         print("🟩 New region added. Drag to adjust the depth range.")
+
+    def remove_last_region(self, track):
+        """Remove only the most recently added region for this track."""
+        for t, r in reversed(self.selected_regions):
+            if t == track:
+                t.removeItem(r)
+                self.selected_regions.remove((t, r))
+                print("❌ Last region added removed from this track.")
+                return
+        print("⚠️ No regions to remove for this track.")
 
     def on_region_changed(self, region):
         """Called whenever a region is resized/moved."""
