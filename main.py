@@ -1,6 +1,11 @@
 import sys
 import pandas as pd
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton, QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout, QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox, QToolButton, QStyle, QComboBox
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton,
+    QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout,
+    QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox,
+    QToolButton, QStyle, QComboBox, QTreeWidget, QTreeWidgetItem
+)
 from PyQt5.QtCore import QAbstractTableModel, Qt
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
@@ -126,21 +131,24 @@ class WellLoggingViewer(QWidget):
         sidebar_menu = QVBoxLayout()
         self.add_button = QPushButton("Add Tracks")
         self.well_combo = QComboBox()
-        self.well_depth_list = QListWidget()
-        self.remove_selection = QPushButton("Remove selected depths")
+        self.well_depth_list = QTreeWidget()
+        self.well_depth_list.setHeaderLabels(["Well", "Depth ranges"])
+        self.well_depth_list.setColumnCount(2)
+        self.remove_selection = QPushButton("Remove selected depth ranges")
         sidebar_menu.addWidget(self.add_button)
         sidebar_menu.addWidget(QLabel("Wells"))
         sidebar_menu.addWidget(self.well_combo)
-        sidebar_menu.addWidget(QLabel("Well depths"))
+        sidebar_menu.addWidget(QLabel("Selected depths"))
         sidebar_menu.addWidget(self.well_depth_list)
         sidebar_menu.addWidget(self.remove_selection)
         sidebar_menu_box = QGroupBox("Plots Settings")
-        sidebar_menu_box.setMaximumWidth(200)
+        sidebar_menu_box.setMaximumWidth(250)
         sidebar_menu_box.setLayout(sidebar_menu)
         # Log Viewer widget
         self.log_viewer = LogViewer()
         self.add_button.clicked.connect(self.add_tracks)
         self.well_combo.currentTextChanged.connect(self.update_log_viewer)
+        self.remove_selection.clicked.connect(self.remove_selected_depth_ranges)
         # Assemble layouts
         full_layout = QHBoxLayout()
         full_layout.addWidget(sidebar_menu_box)
@@ -275,7 +283,7 @@ class WellLoggingViewer(QWidget):
             if dialog.exec_() == QDialog.Accepted:
                 selected_curves = dialog.get_selected_curves()
                 if selected_curves:
-                    print("User selected tracks:", selected_curves)
+                    # print("User selected tracks:", selected_curves)
                     # Save the selection in an attribute or pass to your LogViewer
                     self.selected_tracks = selected_curves
                     # Now add unique wells in the Combo Box
@@ -291,7 +299,64 @@ class WellLoggingViewer(QWidget):
             df_well = self.df[self.df[self.selected_columns.get("Well ID")] == well_name]
             df_depths = df_well[[self.selected_columns.get("Depth")]]
             df_curves = df_well[[col for col in self.selected_tracks if col in df_well.columns]]
-            self.log_viewer.update_tracks(df_depths, df_curves)
+            self.log_viewer.update_tracks(well_name, df_depths, df_curves)
+
+    def update_well_depth_list(self):
+        self.well_depth_list.clear()
+        for well, regions in self.log_viewer.well_regions.items():
+            well_item = QTreeWidgetItem([well])
+            for (y_min, y_max) in regions:
+                child = QTreeWidgetItem(["", f"{y_min:.2f} – {y_max:.2f}"])
+                well_item.addChild(child)
+            self.well_depth_list.addTopLevelItem(well_item)
+        self.well_depth_list.expandAll()
+
+    def remove_selected_depth_ranges(self):
+        """Filter out depths inside the selected ranges and let the user save as a new CSV."""
+        # Check if data and regions exist and are valid
+        if (
+            getattr(self, "df", None) is not None
+            and not self.df.empty
+            and hasattr(self, "selected_columns")
+            and hasattr(self.log_viewer, "well_regions")
+            and self.log_viewer.well_regions
+        ):
+            well_col = self.selected_columns.get("Well ID")
+            depth_col = self.selected_columns.get("Depth")
+
+            if well_col in self.df.columns and depth_col in self.df.columns:
+                df_filtered = self.df.copy()
+                initial_count = len(df_filtered)
+
+                # Loop through wells and depth ranges
+                for well, ranges in self.log_viewer.well_regions.items():
+                    if not ranges:
+                        continue
+
+                    # Keep only rows outside the selected ranges
+                    keep_mask = pd.Series(True, index=df_filtered.index)
+                    for (y_min, y_max) in ranges:
+                        in_range = (df_filtered[depth_col] >= y_min) & (df_filtered[depth_col] <= y_max)
+                        keep_mask &= ~((df_filtered[well_col] == well) & in_range)
+                    df_filtered = df_filtered[keep_mask]
+
+                removed_count = initial_count - len(df_filtered)
+
+                # Ask where to save
+                save_path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Save filtered data as CSV",
+                    "",
+                    "CSV Files (*.csv);;All Files (*)"
+                )
+
+                if save_path:
+                    df_filtered.to_csv(save_path, index=False)
+                    QMessageBox.information(
+                        self,
+                        "Export Successful",
+                        f"Filtered data saved to:\n{save_path}\n\nRemoved {removed_count} rows."
+                    )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -1,23 +1,11 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QComboBox,
     QListWidget, QGroupBox, QScrollArea, QSplitter, QDialog, QFormLayout,
-    QDialogButtonBox, QAbstractItemView, QTabWidget
+    QDialogButtonBox, QAbstractItemView, QTabWidget, QAction
 )
+from PyQt5.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
-
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, 
-    QListWidgetItem, QPushButton, QLabel, QDialogButtonBox,
-    QAbstractItemView
-)
-from PyQt5.QtCore import Qt
-
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, 
-    QPushButton, QLabel, QDialogButtonBox, QAbstractItemView
-)
-from PyQt5.QtCore import Qt
 
 class TrackSelectionDialog(QDialog):
     def __init__(self, df, selected_columns, parent=None):
@@ -116,18 +104,21 @@ class LogViewer(QWidget):
         main_layout.addWidget(self.scroll_area)
         self.setLayout(main_layout)
 
-        # Tracks list
-        self.tracks = []
-        self.depths = None
-        self.selected_regions = []
+        # Parameters
+        self.tracks = [] # variables
+        self.depths = None # depths
+        self.selected_regions = [] # regions
+        self.well_regions = {} # well_name: [(y_min, y_max), ...]
 
-    def update_tracks(self, depths, df_curves):
+    def update_tracks(self, well_name, depths, df_curves):
         """Add curves for selected tracks and current well"""
+        self.well_name = well_name
+        self.well_regions.setdefault(well_name, [])
         # Clear log viewer
         for track in self.tracks:
             self.tracks_layout.removeWidget(track)
             track.deleteLater()
-        self.tracks = []
+        self.tracks.clear()
         self.selected_regions.clear()
 
         reference_track = None
@@ -148,6 +139,9 @@ class LogViewer(QWidget):
             else:
                 track.setYLink(reference_track)
 
+            # Replace ViewBox's context menu handler
+            track.plotItem.vb.mouseClickEvent = lambda ev, tr=track: self.handle_viewbox_click(tr, ev)
+
             track.scene().sigMouseClicked.connect(lambda event, tr=track: self.handle_mouse_click(tr, event))
 
             self.tracks_layout.addWidget(track)
@@ -155,15 +149,51 @@ class LogViewer(QWidget):
         
         self.tracks_container.adjustSize()
 
+    def handle_viewbox_click(self, track, ev):
+        """Intercept right-click to extend context menu with region removal option."""
+        if ev.button() == Qt.RightButton:
+            menu = track.plotItem.vb.getMenu(ev)
+            view_pos = track.plotItem.vb.mapSceneToView(ev.scenePos())
+            clicked_depth = view_pos.y()
+
+            # Clean any previous custom items first
+            for action in menu.actions():
+                if action.text() == "Remove Selected Region":
+                    menu.removeAction(action)
+            for action in menu.actions():
+                if action.isSeparator():
+                    # remove stray separators left from previous call
+                    menu.removeAction(action)
+
+            # Detect where the click is (which region)
+            clicked_region = None
+            for (t, region) in self.selected_regions:
+                if t == track:
+                    y_min, y_max = region.getRegion()
+                    if y_min <= clicked_depth <= y_max:
+                        clicked_region = region
+                        break
+
+            # Add custom option if above a region
+            if clicked_region is not None:
+                menu.addSeparator()
+                remove_action = QAction("Remove Selected Region", menu)
+                remove_action.triggered.connect(lambda _, tr=track, reg=clicked_region: self.remove_region(tr, reg))
+                menu.addAction(remove_action)
+
+            menu.popup(ev.screenPos().toPoint())
+        else:
+            pg.ViewBox.mouseClickEvent(track.plotItem.vb, ev)  # fallback to default behavior
+
     def handle_mouse_click(self, track, event):
-        """Handle left-click (add) and right-click (remove last)."""
+        """Handle left-click (add) and double-click (remove by clicking region)."""
         if not track.sceneBoundingRect().contains(event.scenePos()):
             return
 
-        if event.button() == Qt.LeftButton:
+        # Add new selection region on left click
+        if event.button() == Qt.LeftButton and not event.double():
             self.add_selection_region(track, event)
-        elif event.button() == Qt.RightButton:
-            self.remove_last_region(track)
+            # Append region to 
 
     def add_selection_region(self, track, event):
         """Add a selection region on the clicked track."""
@@ -177,20 +207,36 @@ class LogViewer(QWidget):
         region.sigRegionChanged.connect(lambda: self.on_region_changed(region))
         track.addItem(region)
         self.selected_regions.append((track, region))
+        self.update_region_list()
+        # print("🟩 New region added. Drag to adjust the depth range.")
 
-        print("🟩 New region added. Drag to adjust the depth range.")
-
-    def remove_last_region(self, track):
-        """Remove only the most recently added region for this track."""
-        for t, r in reversed(self.selected_regions):
-            if t == track:
-                t.removeItem(r)
-                self.selected_regions.remove((t, r))
-                print("❌ Last region added removed from this track.")
-                return
-        print("⚠️ No regions to remove for this track.")
+    def remove_region(self, track, region):
+        """Remove the specified selection region from the track."""
+        if (track, region) in self.selected_regions:
+            track.removeItem(region)
+            self.selected_regions.remove((track, region))
+            self.update_region_list()
+            y_min, y_max = region.getRegion()
+            # print(f"❌ Region removed (range {y_min:.2f}-{y_max:.2f})")
 
     def on_region_changed(self, region):
         """Called whenever a region is resized/moved."""
+        self.update_region_list()
         y_min, y_max = region.getRegion()
-        print(f"📏 Selected depth range: {y_min:.2f} – {y_max:.2f}")
+        # print("📏 Selected well:", self.well_name, f"📏 Selected depth range: {y_min:.2f} – {y_max:.2f}")
+    
+    def update_region_list(self):
+        """Update the internal list of selected regions."""
+        regions = []
+        for (t, region) in self.selected_regions:
+            if self.well_name == getattr(self, 'well_name', None):
+                y_min, y_max = region.getRegion()
+                regions.append((round(float(y_min), 2), round(float(y_max), 2)))
+        self.well_regions[self.well_name] = regions
+        parent = self.parent()
+        while parent is not None and not hasattr(parent, "update_well_depth_list"):
+            parent = parent.parent()
+        if parent is not None:
+            parent.update_well_depth_list()
+        # print(f"🔁 Updated regions for {self.well_name}: {regions}")
+        # print(self.well_regions)
