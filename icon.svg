@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">WellLoggingViewer icon</title>
+  <desc id="desc">Stylized well log icon with two vertical tracks, a wiggly log curve and a pick marker. Colors can be changed by editing the hex values in the file.</desc>
+
+  <!-- Color palette (easy to change) -->
+  <!-- primary: #0b66c3 (deep blue) -->
+  <!-- accent:  #ff8c42 (orange)  -->
+  <!-- teal:    #00a3a3 (teal)    -->
+  <!-- neutral: #f6f8fb (light bg) and #2f3a44 (dark grey) -->
+
+  <!-- background rounded square (transparent by default) -->
+  <rect x="8" y="8" width="240" height="240" rx="28" ry="28" fill="none" stroke="#e6eef8" stroke-width="2"/>
+
+  <!-- subtle glowing ring -->
+  <g opacity="0.08">
+    <ellipse cx="128" cy="128" rx="92" ry="92" fill="#0b66c3"/>
+  </g>
+
+  <!-- left track -->
+  <g transform="translate(56, 36)">
+    <rect x="0" y="0" width="36" height="184" rx="4" ry="4" fill="#ffffff" stroke="#d9e9fb" stroke-width="2"/>
+    <!-- internal tick/grid -->
+    <g stroke="#e8f4ff" stroke-width="1">
+      <line x1="6" y1="24" x2="30" y2="24"/>
+      <line x1="6" y1="56" x2="30" y2="56"/>
+      <line x1="6" y1="88" x2="30" y2="88"/>
+      <line x1="6" y1="120" x2="30" y2="120"/>
+      <line x1="6" y1="152" x2="30" y2="152"/>
+      <line x1="6" y1="184" x2="30" y2="184"/>
+    </g>
+  </g>
+
+  <!-- right track -->
+  <g transform="translate(164, 36)">
+    <rect x="0" y="0" width="36" height="184" rx="4" ry="4" fill="#ffffff" stroke="#d9e9fb" stroke-width="2"/>
+    <g stroke="#e8f4ff" stroke-width="1">
+      <line x1="6" y1="24" x2="30" y2="24"/>
+      <line x1="6" y1="56" x2="30" y2="56"/>
+      <line x1="6" y1="88" x2="30" y2="88"/>
+      <line x1="6" y1="120" x2="30" y2="120"/>
+      <line x1="6" y1="152" x2="30" y2="152"/>
+      <line x1="6" y1="184" x2="30" y2="184"/>
+    </g>
+  </g>
+
+  <!-- central column area (between tracks) -->
+  <g transform="translate(98, 40)">
+    <rect x="0" y="0" width="60" height="176" rx="6" ry="6" fill="#fbfdff" stroke="#e0f0fb" stroke-width="1.5"/>
+
+    <!-- vertical depth axis ticks -->
+    <g stroke="#eef8ff" stroke-width="1">
+      <line x1="6" y1="16" x2="54" y2="16"/>
+      <line x1="6" y1="40" x2="54" y2="40"/>
+      <line x1="6" y1="72" x2="54" y2="72"/>
+      <line x1="6" y1="104" x2="54" y2="104"/>
+      <line x1="6" y1="136" x2="54" y2="136"/>
+      <line x1="6" y1="168" x2="54" y2="168"/>
+    </g>
+
+    <!-- wiggly log curve (primary) -->
+    <path d="M 8 20
+             C 18 28, 42 28, 48 44
+             C 54 60, 32 72, 22 88
+             C 12 104, 40 116, 46 132
+             C 52 148, 30 160, 18 168
+             " fill="none" stroke="#0b66c3" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" />
+
+    <!-- subtle shadow/outline for contrast -->
+    <path d="M 8 20
+             C 18 28, 42 28, 48 44
+             C 54 60, 32 72, 22 88
+             C 12 104, 40 116, 46 132
+             C 52 148, 30 160, 18 168
+             " fill="none" stroke="#0c3a66" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.25" />
+
+    <!-- small scatter points (strip plot feel) -->
+    <g>
+      <circle cx="12" cy="22" r="2.6" fill="#00a3a3" opacity="0.9"/>
+      <circle cx="44" cy="46" r="2.6" fill="#ff8c42" opacity="0.9"/>
+      <circle cx="28" cy="90" r="2.6" fill="#00a3a3" opacity="0.9"/>
+      <circle cx="50" cy="134" r="2.6" fill="#ff8c42" opacity="0.95"/>
+      <circle cx="20" cy="170" r="2.6" fill="#00a3a3" opacity="0.9"/>
+    </g>
+
+    <!-- pick marker: stylized diamond with dot -->
+    <g transform="translate(42, 84)">
+      <polygon points="0,-8 6,0 0,8 -6,0" fill="#ff8c42" stroke="#d45f2a" stroke-width="0.8" />
+      <circle cx="0" cy="0" r="2.6" fill="#fff"/>
+    </g>
+  </g>
+
+  <!-- small brand text (optional) -->
+  <g transform="translate(128,232)" text-anchor="middle" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#2f3a44" opacity="0.9">
+    <text x="0" y="0">WellLoggingViewer</text>
+  </g>
+</svg>

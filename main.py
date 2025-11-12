@@ -4,9 +4,12 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QFileDialog, QPushButton,
     QTableView, QLabel, QDialog, QTabWidget, QHBoxLayout,
     QListWidget, QButtonGroup, QRadioButton, QGroupBox, QMessageBox,
-    QToolButton, QStyle, QComboBox, QTreeWidget, QTreeWidgetItem
+    QToolButton, QStyle, QComboBox, QTreeWidget, QTreeWidgetItem,
+    QGraphicsRectItem, QLineEdit, QDialogButtonBox
 )
 from PyQt5.QtCore import QAbstractTableModel, Qt
+import pyqtgraph as pg
+import numpy as np
 from options_csv import LoadCSVDialog, CSVOptions, VariableTypeDialog
 from loc_plot import LocalizationMap
 # from well_plot import PlotConfigDialog, GridSpecDialog, WellPlotter
@@ -70,20 +73,48 @@ class WellLoggingViewer(QWidget):
 
         # Tab 1: Data Table
         self.table_tab = QWidget()
-        table_layout = QVBoxLayout()
-        # Table widget
+        table_layout = QHBoxLayout()
+        # Sidebar (initially hidden)
+        self.var_sidebar = QWidget()
+        self.var_sidebar.setFixedWidth(300)
+        self.sidebar_layout = QVBoxLayout()
+        self.var_sidebar.setLayout(self.sidebar_layout)
+        # Distribution type selector
+        self.plot_type_combo = QComboBox()
+        self.plot_type_combo.addItems(["Histogram", "Boxplot"])
+        self.plot_type_combo.currentTextChanged.connect(self.update_plot_type)
+        self.sidebar_layout.addWidget(self.plot_type_combo)
+        # Plot area
+        self.var_plot = pg.PlotWidget()
+        self.var_plot.setBackground("w")
+        self.sidebar_layout.addWidget(self.var_plot, stretch=1)
+        # Missing values label
+        self.missing_label = QLabel("Missing values: 0")
+        self.sidebar_layout.addWidget(self.missing_label)
+        # Filter and replace button
+        self.replace_button = QPushButton("Filter and replace values")
+        self.replace_button.clicked.connect(self.filter_and_replace_values)
+        self.sidebar_layout.addWidget(self.replace_button)
+        # Export to CSV button
+        self.export_button = QPushButton("Export modified data to CSV")
+        self.export_button.clicked.connect(self.export_modified_data)
+        self.sidebar_layout.addWidget(self.export_button)
+        # Hide sidebar initially
+        self.var_sidebar.hide()
+        # Table
         self.table = QTableView()
-        self.table.clicked.connect(self.handle_column_click) # replace for handle column click and opening a QDialog with the statistics for numeric columns (int or float)
-        table_layout.addWidget(self.table)
-        # Dataset shape
+        header = self.table.horizontalHeader()
+        header.sectionClicked.connect(self.handle_header_click)
+        self.table_view_layout = QVBoxLayout()
+        self.table_view_layout.addWidget(self.table)
+        # Info labels below table
         self.dataset_shape = QLabel("Dataset shape:")
-        table_layout.addWidget(self.dataset_shape)
-        # Well counter widget
         self.well_count = QLabel("Number of wells:")
-        table_layout.addWidget(self.well_count)
-        # Missing values counter widget
-        self.missing_count = QLabel("Missing values:")
-        table_layout.addWidget(self.missing_count)
+        for w in [self.dataset_shape, self.well_count]:
+            self.table_view_layout.addWidget(w)
+        # Combine
+        table_layout.addWidget(self.var_sidebar)
+        table_layout.addLayout(self.table_view_layout)
         self.table_tab.setLayout(table_layout)
         self.tabs.addTab(self.table_tab, "Dataset")
 
@@ -184,7 +215,8 @@ class WellLoggingViewer(QWidget):
                 self.df = pd.read_csv(file_path, sep=sep, header=header, low_memory=low_memory)
                 self.dataset_shape.setText(f"Dataset shape: {self.df.shape[0]} x {self.df.shape[1]}")
                 model = PandasModel(self.df)
-                self.table.setModel(model)
+                self.model = model
+                self.table.setModel(self.model)
 
                 # Show .csv options dialog
                 options_dialog = CSVOptions(self.df)
@@ -230,11 +262,171 @@ class WellLoggingViewer(QWidget):
                     except Exception as e:
                         print(f"Could not convert column {col} to {dtype}: {e}")
 
-    def handle_column_click(self, index):
-        if self.df is not None and index.isValid():
-            column = self.df.columns[index.column()]
-            missing = self.df[column].isna().sum()
-            self.missing_count.setText(f"Missing values in {column}: {missing}")
+    def update_plot_type(self, plot_type):
+        """Update the plot when the user changes the combo box."""
+        self.current_plot_type = plot_type
+        if hasattr(self, "current_column"):
+            col_idx = self.df.columns.get_loc(self.current_column)
+            self.handle_header_click(col_idx)
+
+    def handle_header_click(self, logicalIndex):
+        """Visualize selected column depending on plot type."""
+        self._df = self.df.copy() # Copy for the user to modify
+        col_name = self._df.columns[logicalIndex]
+        self.current_column = col_name
+        series = self._df[col_name]
+
+        # Show sidebar
+        self.var_sidebar.show()
+        self.var_plot.clear()
+        self.var_plot.showGrid(y=True, x=True)
+        # Missing values
+        missing_count = series.isna().sum()
+        self.missing_label.setText(f"Missing values: {missing_count}")
+        self.current_column = col_name
+        # Default plot type
+        plot_type = self.plot_type_combo.currentText()
+
+        if not pd.api.types.is_numeric_dtype(series):
+            self.var_plot.setTitle("Non-numeric column")
+            self.replace_button.setEnabled(False)
+            return
+
+        clean_data = series.dropna().values
+        if len(clean_data) == 0:
+            self.var_plot.setTitle("No valid data")
+            return
+
+        self.replace_button.setEnabled(True)
+
+        if plot_type == "Histogram":
+            y, x = np.histogram(clean_data, bins="auto")
+            bg = pg.BarGraphItem(x=x[:-1], height=y, width=np.diff(x), brush="skyblue")
+            self.var_plot.addItem(bg)
+            self.var_plot.setLabel("bottom", col_name)
+            self.var_plot.setLabel("left", "Count")
+            self.var_plot.setTitle("")
+            self.var_plot.showGrid(x=True, y=True, alpha=0.3)
+            axis_bottom = self.var_plot.getAxis("bottom")
+            axis_bottom.enableAutoSIPrefix(False)
+            axis_bottom.setStyle(tickTextOffset=10)
+
+        elif plot_type == "Boxplot":
+            q1, q2, q3 = np.percentile(clean_data, [25, 50, 75])
+            iqr = q3 - q1
+            lw = np.min(clean_data[clean_data >= q1 - 1.5 * iqr])
+            uw = np.max(clean_data[clean_data <= q3 + 1.5 * iqr])
+
+            # Box rectangle
+            box = QGraphicsRectItem(0.5, q1, 1, q3 - q1)
+            box.setPen(pg.mkPen(color="k", width=1))
+            box.setBrush(pg.mkBrush(200, 200, 255, 150))
+            self.var_plot.addItem(box)
+            # Median line
+            self.var_plot.addItem(pg.InfiniteLine(pos=q2, angle=0, pen=pg.mkPen('r', width=2)))
+            # Whiskers
+            for y in [lw, uw]:
+                self.var_plot.addItem(pg.InfiniteLine(pos=y, angle=0, pen=pg.mkPen('k', width=1)))
+            self.var_plot.addItem(pg.PlotDataItem([1, 1], [q3, uw], pen=pg.mkPen('k')))
+            self.var_plot.addItem(pg.PlotDataItem([1, 1], [q1, lw], pen=pg.mkPen('k')))
+
+            self.var_plot.addItem(pg.ScatterPlotItem(
+                x=[1]*len(clean_data),
+                y=clean_data,
+                pen=None,
+                brush=pg.mkBrush(100, 100, 255, 120),
+                size=6
+            ))
+
+            self.var_plot.setLabel("bottom", "")
+            self.var_plot.setLabel("left", col_name)
+            self.var_plot.setTitle("")
+
+    def filter_and_replace_values(self):
+        """Ask user for min/max values and clip the selected column accordingly."""
+        if not hasattr(self, "current_column"):
+            QMessageBox.warning(self, "No Column Selected", "Please select a column first.")
+            return
+
+        col = self.current_column
+        df = self.model._df
+
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            QMessageBox.warning(self, "Invalid Column", f"The column '{col}' is not numeric.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Filter values in '{col}'")
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel(f"Enter min and max allowed values for '{col}':"))
+        min_input = QLineEdit()
+        max_input = QLineEdit()
+        min_input.setPlaceholderText("Minimum value (leave empty for no limit)")
+        max_input.setPlaceholderText("Maximum value (leave empty for no limit)")
+
+        layout.addWidget(QLabel("Minimum value:"))
+        layout.addWidget(min_input)
+        layout.addWidget(QLabel("Maximum value:"))
+        layout.addWidget(max_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        try:
+            min_val = float(min_input.text()) if min_input.text() else None
+            max_val = float(max_input.text()) if max_input.text() else None
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter valid numeric values.")
+            return
+
+        # Apply clipping
+        if min_val is not None:
+            df.loc[df[col] < min_val, col] = min_val
+        if max_val is not None:
+            df.loc[df[col] > max_val, col] = max_val
+
+        self._df = df
+        self.model.layoutChanged.emit()
+        self.handle_header_click(df.columns.get_loc(col))
+
+        QMessageBox.information(self, "Values Updated", f"Values in '{col}' were filtered to the range [{min_val}, {max_val}].")
+
+    def export_modified_data(self):
+        """Open a save dialog and export the modified DataFrame to a CSV file."""
+        if not hasattr(self, "_df") or self._df is None or self._df.empty:
+            QMessageBox.warning(self, "No Data", "There is no modified data to export.")
+            return
+
+        # Open file save dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Filtered Dataset",
+            "",
+            "CSV Files (*.csv);;Excel Files (*.xlsx)"
+        )
+
+        if not file_path:
+            return
+
+        # Save based on extension
+        try:
+            if file_path.endswith(".xlsx"):
+                self._df.to_excel(file_path, index=False)
+            else:
+                # Default: save as CSV
+                if not file_path.endswith(".csv"):
+                    file_path += ".csv"
+                self._df.to_csv(file_path, index=False)
+
+            QMessageBox.information(self, "Success", f"Dataset exported successfully:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to export dataset:\n{str(e)}")
 
     def plot_localization_map(self, mode):
         if self.df is not None:
