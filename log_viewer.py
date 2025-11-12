@@ -108,7 +108,7 @@ class LogViewer(QWidget):
         self.tracks = [] # variables
         self.depths = None # depths
         self.selected_regions = [] # regions
-        self.well_regions = {} # well_name: [(y_min, y_max), ...]
+        self.well_regions = {} # {well_name: [{"track_index": ..., "y_min": ..., , "y_max": ...}, {}, ...]}
 
     def update_tracks(self, well_name, depths, df_curves):
         """Add curves for selected tracks and current well"""
@@ -148,6 +148,8 @@ class LogViewer(QWidget):
             self.tracks.append(track)
         
         self.tracks_container.adjustSize()
+        # Restore saved regions if any
+        self.restore_regions_for_well(well_name)
 
     def handle_viewbox_click(self, track, ev):
         """Intercept right-click to extend context menu with region removal option."""
@@ -231,12 +233,60 @@ class LogViewer(QWidget):
         for (t, region) in self.selected_regions:
             if self.well_name == getattr(self, 'well_name', None):
                 y_min, y_max = region.getRegion()
-                regions.append((round(float(y_min), 2), round(float(y_max), 2)))
+                # Identify the track by index (safer than by name)
+                try:
+                    track_index = self.tracks.index(t)
+                except ValueError:
+                    continue
+                regions.append({
+                    "track_index": track_index,
+                    "y_min": round(float(y_min), 2),
+                    "y_max": round(float(y_max), 2)
+                })
         self.well_regions[self.well_name] = regions
+
         parent = self.parent()
         while parent is not None and not hasattr(parent, "update_well_depth_list"):
             parent = parent.parent()
         if parent is not None:
             parent.update_well_depth_list()
-        # print(f"🔁 Updated regions for {self.well_name}: {regions}")
-        # print(self.well_regions)
+
+    def restore_regions_for_well(self, well_name):
+        """Recreate saved selection regions for the given well. 
+        It doesnt work if the user change the current track list,
+        since it stores the index of the track which the selection was made."""
+        if well_name not in self.well_regions:
+            return
+        
+        saved_regions = self.well_regions[well_name]
+        for reg in saved_regions: # each dict inside the list of regions
+            idx = reg.get("track_index", 0)
+            if idx < len(self.tracks):
+                track = self.tracks[idx]
+                y_min, y_max = reg["y_min"], reg["y_max"]
+
+                region = pg.LinearRegionItem(values=(y_min, y_max), orientation=pg.LinearRegionItem.Horizontal)
+                region.setZValue(10)
+                region.sigRegionChanged.connect(lambda: self.on_region_changed(region))
+                track.addItem(region)
+                self.selected_regions.append((track, region))
+
+    def reset_viewer(self, clear_all_wells=True):
+        """Completely reset the LogViewer visual state."""
+        # Remove all track widgets
+        for track in self.tracks:
+            self.tracks_layout.removeWidget(track)
+            track.deleteLater()
+        self.tracks.clear()
+
+        # Clear selections
+        self.selected_regions.clear()
+        self.depths = None
+        self.well_name = None
+
+        # Optionally clear stored well regions
+        if clear_all_wells:
+            self.well_regions.clear()
+
+        # Adjust layout
+        self.tracks_container.adjustSize()

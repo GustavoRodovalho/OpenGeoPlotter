@@ -39,6 +39,18 @@ class PandasModel(QAbstractTableModel):
                 return str(self._df.index[section])
         return None
 
+class InfoBtn(QToolButton):
+    def __init__(self, tooltip_text):
+        super().__init__()
+        self.setToolTip(tooltip_text)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAutoRaise(True)
+        self.setFixedSize(16, 16)
+        # Use the platform's standard "information" icon
+        info_icon = self.style().standardIcon(QStyle.SP_MessageBoxInformation)
+        self.setIcon(info_icon)
+        self.setIconSize(self.size() * 0.8)
+
 class WellLoggingViewer(QWidget):
     def __init__(self):
         super().__init__()
@@ -95,16 +107,9 @@ class WellLoggingViewer(QWidget):
         info_layout = QHBoxLayout()
         select_label = QLabel("Selected wells")
         info_layout.addWidget(select_label)
-        info_btn = QToolButton()
-        info_btn.setToolTip("Left-click on the canvas to make a selection.\nRight-click anywhere to clear selected wells.")
-        info_btn.setCursor(Qt.PointingHandCursor)
-        info_btn.setAutoRaise(True)
-        info_btn.setFixedSize(16, 16)
-        # Use the platform's standard "information" icon
-        info_icon = info_btn.style().standardIcon(QStyle.SP_MessageBoxInformation)
-        info_btn.setIcon(info_icon)
-        info_btn.setIconSize(info_btn.size() * 0.8)
-        info_layout.addWidget(info_btn)
+        loc_info_btn = InfoBtn(
+            tooltip_text="Left-click on the canvas to make a selection.\nRight-click anywhere to clear selected wells.")
+        info_layout.addWidget(loc_info_btn)
         info_layout.addStretch()
         sidebar.addLayout(info_layout)
         sidebar.addWidget(self.point_list)
@@ -138,7 +143,16 @@ class WellLoggingViewer(QWidget):
         sidebar_menu.addWidget(self.add_button)
         sidebar_menu.addWidget(QLabel("Wells"))
         sidebar_menu.addWidget(self.well_combo)
-        sidebar_menu.addWidget(QLabel("Selected depths"))
+        # Add depths selection label and info button
+        info_depths_layout = QHBoxLayout()
+        select_depths_label = QLabel("Selected depths")
+        info_depths_layout.addWidget(select_depths_label)
+        log_info_btn = InfoBtn(
+            tooltip_text="Left-click on the tracks to make a selection.\nRight-click to clear the selected depth range.")
+        info_depths_layout.addWidget(log_info_btn)
+        info_depths_layout.addStretch()
+        sidebar_menu.addLayout(info_depths_layout)
+        # Add list widget and remove button
         sidebar_menu.addWidget(self.well_depth_list)
         sidebar_menu.addWidget(self.remove_selection)
         sidebar_menu_box = QGroupBox("Plots Settings")
@@ -281,18 +295,18 @@ class WellLoggingViewer(QWidget):
         if self.df is not None and self.selected_columns is not None:
             dialog = TrackSelectionDialog(self.df, self.selected_columns, self)
             if dialog.exec_() == QDialog.Accepted:
+                # Reset log viewer and well depth list to default
+                self.log_viewer.reset_viewer(clear_all_wells=True)
+                self.well_depth_list.clear()
+                # Get curves for tracks
                 selected_curves = dialog.get_selected_curves()
                 if selected_curves:
-                    # print("User selected tracks:", selected_curves)
-                    # Save the selection in an attribute or pass to your LogViewer
                     self.selected_tracks = selected_curves
                     # Now add unique wells in the Combo Box
                     self.well_combo.clear()
                     well_column = self.selected_columns.get("Well ID")
                     self.unique_wells = self.df[well_column].dropna().unique()
                     self.well_combo.addItems([""]+[str(well) for well in self.unique_wells])
-                    # When the user select an item in the Combo Box, update the LogViewer with the selected tracks for that well
-                    # self.log_viewer.add_tracks(selected_curves)
 
     def update_log_viewer(self, well_name):
         if well_name.strip():
@@ -304,8 +318,12 @@ class WellLoggingViewer(QWidget):
     def update_well_depth_list(self):
         self.well_depth_list.clear()
         for well, regions in self.log_viewer.well_regions.items():
+            if not regions:
+                continue
             well_item = QTreeWidgetItem([well])
-            for (y_min, y_max) in regions:
+            for reg in regions:
+                y_min = reg.get("y_min", 0.0)
+                y_max = reg.get("y_max", 0.0)
                 child = QTreeWidgetItem(["", f"{y_min:.2f} – {y_max:.2f}"])
                 well_item.addChild(child)
             self.well_depth_list.addTopLevelItem(well_item)
@@ -328,14 +346,16 @@ class WellLoggingViewer(QWidget):
                 df_filtered = self.df.copy()
                 initial_count = len(df_filtered)
 
-                # Loop through wells and depth ranges
-                for well, ranges in self.log_viewer.well_regions.items():
-                    if not ranges:
+                # Loop through wells and regions
+                for well, regions in self.log_viewer.well_regions.items():
+                    if not regions:
                         continue
 
-                    # Keep only rows outside the selected ranges
+                    # Keep only rows outside the selected regions
                     keep_mask = pd.Series(True, index=df_filtered.index)
-                    for (y_min, y_max) in ranges:
+                    for reg in regions:
+                        y_min = reg.get("y_min")
+                        y_max = reg.get("y_max")
                         in_range = (df_filtered[depth_col] >= y_min) & (df_filtered[depth_col] <= y_max)
                         keep_mask &= ~((df_filtered[well_col] == well) & in_range)
                     df_filtered = df_filtered[keep_mask]
